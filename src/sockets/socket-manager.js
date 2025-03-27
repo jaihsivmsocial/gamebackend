@@ -1,16 +1,18 @@
+
 // const { Server } = require("socket.io")
 // const { createAdapter } = require("@socket.io/redis-adapter")
-// const { redisClient, redisPubClient, redisSubClient, viewerCounter } = require("../config/redis")
+// const { redisClient, redisPubClient, redisSubClient, viewerCounter, chatRateLimiter } = require("../config/redis")
 // const Stream = require("../model/streamModel")
 // // const { nanoid } = require("nanoid")
 // const mongoose = require("mongoose")
 // const streamController = require("../controller/stream-controller")
-
+// // const chatRateLimiter = require("../utils/rateLimiter") // Import the rate limiter
 
 // async function generateId() {
-//   const { nanoid } = await import('nanoid');
-//   console.log(nanoid());
+//   const { nanoid } = await import("nanoid")
+//   console.log(nanoid())
 // }
+
 // // Helper function for default avatars
 // function getDefaultAvatar(anonymousId, username) {
 //   const styles = ["adventurer", "avataaars", "bottts", "jdenticon"]
@@ -24,6 +26,8 @@
 // function isValidObjectId(id) {
 //   return mongoose.Types.ObjectId.isValid(id)
 // }
+
+
 
 // module.exports = async function setupSocketIO(server) {
 //   // Create Socket.IO server with Redis adapter for horizontal scaling
@@ -40,11 +44,14 @@
 //     maxHttpBufferSize: 1e6,
 //   })
 
+//   // Set up Redis pub/sub for efficient message distribution
+//   const chatSubscriber = setupRedisPubSub(io)
+
 //   // Reset all viewer counts on server start
 //   await resetAllViewerCounts()
 
 //   // Set up a periodic cleanup task to remove stale viewers
-//   setInterval(cleanupStaleViewers, 5 * 60 * 1000) // Run every 5 minutes
+//   setInterval(cleanupStaleViewers, 60 * 1000) // Run every minute for more frequent cleanup
 
 //   // Middleware to set up user data
 //   io.use((socket, next) => {
@@ -62,7 +69,7 @@
 //           socket.user = {
 //             id: "user-id-from-token",
 //             username: "username-from-token",
-//             profilePicture: "profile-picture-from-token",
+//             profilePicture: "/placeholder.svg?height=30&width=30", // Use a valid URL format
 //             isAnonymous: false,
 //           }
 //         } catch (error) {
@@ -128,16 +135,33 @@
 //           return
 //         }
 
+//         // First, leave any other streams this socket might be watching
+//         // This ensures a user can only watch one stream at a time for accurate counting
+//         for (const currentStreamId of watchingStreams) {
+//           if (currentStreamId !== streamId) {
+//             await leaveStream(socket, currentStreamId)
+//           }
+//         }
+
+//         // Check if this viewer is already counted in Redis
+//         const viewerKey = `viewer:${streamId}:${socket.id}`
+//         const exists = await redisClient.exists(viewerKey)
+//         if (exists) {
+//           console.log(`User ${socket.id} already counted for stream: ${streamId}`)
+//           // Just refresh the TTL without incrementing count
+//           await redisClient.expire(viewerKey, 120) // Expires in 2 minutes if no heartbeat
+//           return
+//         }
+
 //         socket.join(roomName)
 //         watchingStreams.add(streamId)
 //         console.log(`User ${socket.id} joined stream: ${streamId}`)
 
 //         // Store this connection in Redis to track unique viewers
-//         const viewerKey = `viewer:${streamId}:${socket.id}`
 //         await redisClient.set(viewerKey, "1", "EX", 120) // Expires in 2 minutes if no heartbeat
 
-//         // Increment viewer count in Redis
-//         const viewerCount = await incrementViewerCount(streamId)
+//         // Increment viewer count using the viewerCounter utility
+//         const viewerCount = await viewerCounter.incrementViewers(streamId)
 //         console.log(`Updated viewer count for ${streamId}: ${viewerCount}`)
 
 //         // Broadcast viewer count to all clients (not just those in the room)
@@ -159,12 +183,12 @@
 //       }
 //     })
 
-//     // Handle leave stream
-//     socket.on("leave_stream", async ({ streamId }) => {
+//     // Helper function to leave a stream
+//     async function leaveStream(socket, streamId) {
 //       try {
 //         if (!streamId) return
 
-//         console.log(`User ${socket.id} attempting to leave stream: ${streamId}`)
+//         console.log(`User ${socket.id} leaving stream: ${streamId}`)
 
 //         const roomName = `stream:${streamId}`
 
@@ -183,8 +207,8 @@
 //         const viewerKey = `viewer:${streamId}:${socket.id}`
 //         await redisClient.del(viewerKey)
 
-//         // Decrement viewer count
-//         const viewerCount = await decrementViewerCount(streamId)
+//         // Decrement viewer count using the viewerCounter utility
+//         const viewerCount = await viewerCounter.decrementViewers(streamId)
 //         console.log(`Updated viewer count for ${streamId}: ${viewerCount}`)
 
 //         // Broadcast to all clients (not just those in the room)
@@ -192,6 +216,11 @@
 //       } catch (error) {
 //         console.error("Leave stream error:", error)
 //       }
+//     }
+
+//     // Handle leave stream
+//     socket.on("leave_stream", async ({ streamId }) => {
+//       await leaveStream(socket, streamId)
 //     })
 
 //     // Handle disconnection
@@ -201,16 +230,7 @@
 
 //         // Leave all streams this socket was watching
 //         for (const streamId of watchingStreams) {
-//           // Remove this connection from Redis
-//           const viewerKey = `viewer:${streamId}:${socket.id}`
-//           await redisClient.del(viewerKey)
-
-//           // Decrement viewer count
-//           const viewerCount = await decrementViewerCount(streamId)
-//           console.log(`Updated viewer count for ${streamId}: ${viewerCount}`)
-
-//           // Broadcast to all clients
-//           io.emit("viewer_count", { streamId, count: viewerCount })
+//           await leaveStream(socket, streamId)
 //         }
 
 //         console.log(`User disconnected: ${socket.id}`)
@@ -336,17 +356,24 @@
 //       try {
 //         if (!content.trim() || !streamId) return
 
-//         // Check rate limiting
+//         // Check rate limiting - with enhanced feedback
 //         const canSend = await checkRateLimit(socket.user.id, streamId)
 //         if (!canSend) {
-//           socket.emit("error", { message: "Rate limit exceeded" })
+//           socket.emit("error", {
+//             message: "Rate limit exceeded. Please wait before sending more messages.",
+//             code: "RATE_LIMIT",
+//             retryAfter: 2, // Suggest retry after 2 seconds
+//           })
 //           return
 //         }
 
 //         const messageId = `msg-${Date.now()}-${generateId(6)}`
 //         const timestamp = Date.now()
 
-//         // Create message object
+//         // Get the real username from socket.handshake.auth if available
+//         const realUsername = socket.handshake.auth.realUsername || socket.user.username
+
+//         // Create message object with real username
 //         const message = {
 //           id: messageId,
 //           content,
@@ -354,21 +381,37 @@
 //           timestamp,
 //           sender: {
 //             id: socket.user.id,
-//             username: socket.user.username,
+//             username: realUsername, // Use real username instead of anonymous
 //             profilePicture: socket.user.profilePicture,
 //             isAnonymous: socket.user.isAnonymous,
 //           },
 //         }
 
-//         // Store in Redis for recent messages
-//         await storeMessage(streamId, message)
+//         // For extremely high volume streams, use sharded message storage
+//         // This helps distribute the load across Redis instances
+//         const streamShard = getStreamShard(streamId)
+//         const messageKey = `messages:${streamShard}:${streamId}`
 
-//         // Broadcast to ALL clients in the stream room
-//         io.to(`stream:${streamId}`).emit("new_message", message)
+//         // Store in Redis for recent messages - with optimized storage
+//         await storeMessage(messageKey, message)
+
+//         // For high-volume streams, use a pub/sub approach instead of room broadcasting
+//         // This is more efficient for very large numbers of recipients
+//         redisPubClient.publish(
+//           `chat:${streamId}`,
+//           JSON.stringify({
+//             type: "new_message",
+//             message,
+//           }),
+//         )
+
+//         // Also emit to socket room for backward compatibility
+//         socket.to(`stream:${streamId}`).emit("new_message", message)
 
 //         // Increment message count in stream metrics only if streamId is a valid ObjectId
 //         if (isValidObjectId(streamId)) {
-//           await streamController.incrementMessageCount(streamId)
+//           // Use a more efficient counter increment for high volume
+//           await incrementMessageCounter(streamId)
 //         }
 //       } catch (error) {
 //         console.error("Send message error:", error)
@@ -390,50 +433,101 @@
 //     })
 //   })
 
-//   // Helper functions for Redis operations
-//   async function incrementViewerCount(streamId) {
-//     const key = `viewers:${streamId}`
-//     const count = await redisClient.incr(key)
-//     await redisClient.expire(key, 3600) // 1 hour TTL
-//     return Number.parseInt(count)
+//   async function checkRateLimit(userId, streamId) {
+//     return await chatRateLimiter.checkLimit(userId, streamId)
 //   }
 
-//   async function decrementViewerCount(streamId) {
-//     const key = `viewers:${streamId}`
-//     const count = await redisClient.decr(key)
-//     // If count is 0 or negative, delete the key to clean up
-//     if (count <= 0) {
-//       await redisClient.del(key)
-//       return 0
+//   // Helper function to get a shard key for a stream
+//   // This helps distribute data across Redis instances for high-volume streams
+//   function getStreamShard(streamId) {
+//     // Simple sharding based on the last character of the streamId
+//     // In production, you would use a more sophisticated sharding strategy
+//     return streamId.slice(-1).charCodeAt(0) % 10
+//   }
+
+//   // More efficient counter increment for high message volumes
+//   async function incrementMessageCounter(streamId) {
+//     // Use a batched counter approach to reduce Redis operations
+//     const counterKey = `msgcount:${streamId}`
+//     const batchKey = `msgcount:batch:${streamId}`
+
+//     // Increment the batch counter
+//     await redisClient.incr(batchKey)
+
+//     // Every 100 messages, update the main counter and reset the batch
+//     const batchCount = await redisClient.get(batchKey)
+//     if (batchCount && Number.parseInt(batchCount) >= 100) {
+//       await redisClient.incrby(counterKey, Number.parseInt(batchCount))
+//       await redisClient.set(batchKey, 0)
+
+//       // Update the stream metrics in MongoDB in batches
+//       streamController
+//         .incrementMessageCountBatch(streamId, Number.parseInt(batchCount))
+//         .catch((err) => console.error(`Failed to update message count for ${streamId}:`, err))
 //     }
-//     return Number.parseInt(count)
 //   }
 
-//   async function storeMessage(streamId, message) {
-//     const key = `messages:${streamId}`
+//   async function storeMessage(key, message) {
+//     // Use pipeline for better performance with high message volumes
 //     await redisClient
 //       .multi()
 //       .zadd(key, message.timestamp, JSON.stringify(message))
 //       .zremrangebyrank(key, 0, -101) // Keep only the latest 100 messages
 //       .expire(key, 86400) // 24 hours TTL
 //       .exec()
+
+//     // For extremely high volume streams, we can also implement message archiving
+//     // This would move older messages to a more permanent storage solution
+//     if (Math.random() < 0.01) {
+//       // 1% chance to check if archiving is needed
+//       checkMessageArchiving(key).catch((err) => console.error(`Error checking message archiving for ${key}:`, err))
+//     }
+//   }
+
+//   // Function to check if messages need to be archived
+//   async function checkMessageArchiving(key) {
+//     // Get count of messages in this stream
+//     const count = await redisClient.zcard(key)
+
+//     // If we have a lot of messages, archive the older ones
+//     if (count > 1000) {
+//       // In a real implementation, this would move older messages to a database
+//       // For now, we'll just log that archiving would happen
+//       console.log(`Would archive older messages for ${key}, current count: ${count}`)
+
+//       // In production, you would:
+//       // 1. Get the oldest messages
+//       // 2. Store them in a database
+//       // 3. Remove them from Redis
+//     }
+//   }
+
+//   // Set up Redis pub/sub for chat messages
+//   // This is more efficient than Socket.IO rooms for very high volumes
+//   function setupRedisPubSub(io) {
+//     const subscriber = redisSubClient.duplicate()
+
+//     subscriber.on("message", (channel, message) => {
+//       if (channel.startsWith("chat:")) {
+//         const streamId = channel.split(":")[1]
+//         const data = JSON.parse(message)
+
+//         // Broadcast to all clients in the stream room
+//         io.to(`stream:${streamId}`).emit(data.type, data.message)
+//       }
+//     })
+
+//     // Subscribe to all chat channels
+//     subscriber.psubscribe("chat:*")
+
+//     return subscriber
 //   }
 
 //   async function getRecentMessages(streamId) {
-//     const key = `messages:${streamId}`
+//     const streamShard = getStreamShard(streamId)
+//     const key = `messages:${streamShard}:${streamId}`
 //     const messages = await redisClient.zrevrange(key, 0, 49) // Get latest 50 messages
 //     return messages.map((msg) => JSON.parse(msg)).reverse() // Oldest first
-//   }
-
-//   async function checkRateLimit(userId, streamId) {
-//     const key = `ratelimit:chat:${userId}:${streamId}`
-//     const count = await redisClient.incr(key)
-
-//     if (count === 1) {
-//       await redisClient.expire(key, 10) // 10 seconds window
-//     }
-
-//     return count <= 5 // 5 messages per 10 seconds
 //   }
 
 //   // Reset all viewer counts
@@ -459,6 +553,21 @@
 //         }
 //         console.log(`Reset ${viewerKeys.length} viewer tracking keys on server start`)
 //       }
+
+//       // Set all active streams to have 0 viewers
+//       const streamIds = await Stream.distinct("streamId")
+//       for (const streamId of streamIds) {
+//         await viewerCounter.resetViewerCount(streamId)
+//         // Broadcast the reset count
+//         io.emit("viewer_count", { streamId, count: 0 })
+//       }
+
+//       // Also set test streams to 0
+//       const testStreamIds = ["stream-1", "stream-2", "stream-3", "stream-4", "default-stream"]
+//       for (const streamId of testStreamIds) {
+//         await viewerCounter.resetViewerCount(streamId)
+//         io.emit("viewer_count", { streamId, count: 0 })
+//       }
 //     } catch (error) {
 //       console.error("Error resetting viewer counts:", error)
 //     }
@@ -479,24 +588,15 @@
 //         }
 //       }
 
-//       // For each stream, count active viewers and update the count
+//       // For each stream, sync the viewer count with the actual number of active viewers
 //       for (const streamId of streamIds) {
-//         const streamViewerKeys = viewerKeys.filter((key) => key.startsWith(`viewer:${streamId}:`))
-//         const activeViewers = streamViewerKeys.length
-
-//         // Update the viewer count in Redis
-//         const key = `viewers:${streamId}`
-//         if (activeViewers === 0) {
-//           // No active viewers, delete the key
-//           await redisClient.del(key)
-//         } else {
-//           // Set the count to the number of active viewers
-//           await redisClient.set(key, activeViewers.toString())
-//           await redisClient.expire(key, 3600) // 1 hour TTL
-//         }
+//         // Use the viewerCounter utility to sync the count
+//         const activeViewers = await viewerCounter.syncViewerCount(streamId)
 
 //         // Broadcast the updated count
 //         io.emit("viewer_count", { streamId, count: activeViewers })
+
+//         console.log(`Synced viewer count for ${streamId}: ${activeViewers}`)
 //       }
 
 //       console.log(`Cleaned up viewer counts for ${streamIds.size} streams`)
@@ -505,23 +605,56 @@
 //     }
 //   }
 
+//   // Create API endpoint for synchronous decrements (for beforeunload events)
+//   server.on("request", async (req, res) => {
+//     if (req.method === "POST" && req.url.startsWith("/api/viewer/decrement/")) {
+//       try {
+//         const streamId = req.url.split("/").pop()
+//         if (!streamId) {
+//           res.writeHead(400)
+//           res.end(JSON.stringify({ success: false, message: "Stream ID required" }))
+//           return
+//         }
+
+//         // Decrement the viewer count using the viewerCounter utility
+//         const newCount = await viewerCounter.decrementViewers(streamId)
+
+//         // Broadcast the updated count
+//         io.emit("viewer_count", { streamId, count: newCount })
+
+//         res.writeHead(200, { "Content-Type": "application/json" })
+//         res.end(JSON.stringify({ success: true, viewerCount: newCount }))
+//       } catch (error) {
+//         console.error("Error in sync decrement:", error)
+//         res.writeHead(500)
+//         res.end(JSON.stringify({ success: false, message: "Server error" }))
+//       }
+//     }
+//   })
+
+//   // Make sure to clean up the subscriber when the server shuts down
+//   process.on("SIGTERM", () => {
+//     chatSubscriber.punsubscribe()
+//     chatSubscriber.quit()
+//   })
+
 //   return io
 // }
 
-
-
 const { Server } = require("socket.io")
 const { createAdapter } = require("@socket.io/redis-adapter")
-const { redisClient, redisPubClient, redisSubClient, viewerCounter } = require("../config/redis")
+const { redisClient, redisPubClient, redisSubClient, viewerCounter, chatRateLimiter } = require("../config/redis")
 const Stream = require("../model/streamModel")
 // const { nanoid } = require("nanoid")
 const mongoose = require("mongoose")
 const streamController = require("../controller/stream-controller")
+// const chatRateLimiter = require("../utils/rateLimiter") // Import the rate limiter
 
 async function generateId() {
   const { nanoid } = await import("nanoid")
   console.log(nanoid())
 }
+
 // Helper function for default avatars
 function getDefaultAvatar(anonymousId, username) {
   const styles = ["adventurer", "avataaars", "bottts", "jdenticon"]
@@ -551,11 +684,14 @@ module.exports = async function setupSocketIO(server) {
     maxHttpBufferSize: 1e6,
   })
 
+  // Set up Redis pub/sub for efficient message distribution
+  const chatSubscriber = setupRedisPubSub(io)
+
   // Reset all viewer counts on server start
   await resetAllViewerCounts()
 
   // Set up a periodic cleanup task to remove stale viewers
-  setInterval(cleanupStaleViewers, 5 * 60 * 1000) // Run every 5 minutes
+  setInterval(cleanupStaleViewers, 60 * 1000) // Run every minute for more frequent cleanup
 
   // Middleware to set up user data
   io.use((socket, next) => {
@@ -573,7 +709,7 @@ module.exports = async function setupSocketIO(server) {
           socket.user = {
             id: "user-id-from-token",
             username: "username-from-token",
-            profilePicture: "profile-picture-from-token",
+            profilePicture: "/placeholder.svg?height=30&width=30", // Use a valid URL format
             isAnonymous: false,
           }
         } catch (error) {
@@ -639,16 +775,33 @@ module.exports = async function setupSocketIO(server) {
           return
         }
 
+        // First, leave any other streams this socket might be watching
+        // This ensures a user can only watch one stream at a time for accurate counting
+        for (const currentStreamId of watchingStreams) {
+          if (currentStreamId !== streamId) {
+            await leaveStream(socket, currentStreamId)
+          }
+        }
+
+        // Check if this viewer is already counted in Redis
+        const viewerKey = `viewer:${streamId}:${socket.id}`
+        const exists = await redisClient.exists(viewerKey)
+        if (exists) {
+          console.log(`User ${socket.id} already counted for stream: ${streamId}`)
+          // Just refresh the TTL without incrementing count
+          await redisClient.expire(viewerKey, 120) // Expires in 2 minutes if no heartbeat
+          return
+        }
+
         socket.join(roomName)
         watchingStreams.add(streamId)
         console.log(`User ${socket.id} joined stream: ${streamId}`)
 
         // Store this connection in Redis to track unique viewers
-        const viewerKey = `viewer:${streamId}:${socket.id}`
         await redisClient.set(viewerKey, "1", "EX", 120) // Expires in 2 minutes if no heartbeat
 
-        // Increment viewer count in Redis
-        const viewerCount = await incrementViewerCount(streamId)
+        // Increment viewer count using the viewerCounter utility
+        const viewerCount = await viewerCounter.incrementViewers(streamId)
         console.log(`Updated viewer count for ${streamId}: ${viewerCount}`)
 
         // Broadcast viewer count to all clients (not just those in the room)
@@ -670,12 +823,12 @@ module.exports = async function setupSocketIO(server) {
       }
     })
 
-    // Handle leave stream
-    socket.on("leave_stream", async ({ streamId }) => {
+    // Helper function to leave a stream
+    async function leaveStream(socket, streamId) {
       try {
         if (!streamId) return
 
-        console.log(`User ${socket.id} attempting to leave stream: ${streamId}`)
+        console.log(`User ${socket.id} leaving stream: ${streamId}`)
 
         const roomName = `stream:${streamId}`
 
@@ -694,8 +847,8 @@ module.exports = async function setupSocketIO(server) {
         const viewerKey = `viewer:${streamId}:${socket.id}`
         await redisClient.del(viewerKey)
 
-        // Decrement viewer count
-        const viewerCount = await decrementViewerCount(streamId)
+        // Decrement viewer count using the viewerCounter utility
+        const viewerCount = await viewerCounter.decrementViewers(streamId)
         console.log(`Updated viewer count for ${streamId}: ${viewerCount}`)
 
         // Broadcast to all clients (not just those in the room)
@@ -703,6 +856,11 @@ module.exports = async function setupSocketIO(server) {
       } catch (error) {
         console.error("Leave stream error:", error)
       }
+    }
+
+    // Handle leave stream
+    socket.on("leave_stream", async ({ streamId }) => {
+      await leaveStream(socket, streamId)
     })
 
     // Handle disconnection
@@ -712,16 +870,7 @@ module.exports = async function setupSocketIO(server) {
 
         // Leave all streams this socket was watching
         for (const streamId of watchingStreams) {
-          // Remove this connection from Redis
-          const viewerKey = `viewer:${streamId}:${socket.id}`
-          await redisClient.del(viewerKey)
-
-          // Decrement viewer count
-          const viewerCount = await decrementViewerCount(streamId)
-          console.log(`Updated viewer count for ${streamId}: ${viewerCount}`)
-
-          // Broadcast to all clients
-          io.emit("viewer_count", { streamId, count: viewerCount })
+          await leaveStream(socket, streamId)
         }
 
         console.log(`User disconnected: ${socket.id}`)
@@ -843,14 +992,18 @@ module.exports = async function setupSocketIO(server) {
     })
 
     // Handle chat messages
-    socket.on("send_message", async ({ content, streamId }) => {
+    socket.on("send_message", async ({ content, streamId, replyTo }) => {
       try {
         if (!content.trim() || !streamId) return
 
-        // Check rate limiting
+        // Check rate limiting - with enhanced feedback
         const canSend = await checkRateLimit(socket.user.id, streamId)
         if (!canSend) {
-          socket.emit("error", { message: "Rate limit exceeded" })
+          socket.emit("error", {
+            message: "Rate limit exceeded. Please wait before sending more messages.",
+            code: "RATE_LIMIT",
+            retryAfter: 2, // Suggest retry after 2 seconds
+          })
           return
         }
 
@@ -872,17 +1025,34 @@ module.exports = async function setupSocketIO(server) {
             profilePicture: socket.user.profilePicture,
             isAnonymous: socket.user.isAnonymous,
           },
+          replyTo: replyTo || null,
         }
 
-        // Store in Redis for recent messages
-        await storeMessage(streamId, message)
+        // For extremely high volume streams, use sharded message storage
+        // This helps distribute the load across Redis instances
+        const streamShard = getStreamShard(streamId)
+        const messageKey = `messages:${streamShard}:${streamId}`
 
-        // Broadcast to ALL clients in the stream room
-        io.to(`stream:${streamId}`).emit("new_message", message)
+        // Store in Redis for recent messages - with optimized storage
+        await storeMessage(messageKey, message)
+
+        // For high-volume streams, use a pub/sub approach instead of room broadcasting
+        // This is more efficient for very large numbers of recipients
+        redisPubClient.publish(
+          `chat:${streamId}`,
+          JSON.stringify({
+            type: "new_message",
+            message,
+          }),
+        )
+
+        // Also emit to socket room for backward compatibility
+        socket.to(`stream:${streamId}`).emit("new_message", message)
 
         // Increment message count in stream metrics only if streamId is a valid ObjectId
         if (isValidObjectId(streamId)) {
-          await streamController.incrementMessageCount(streamId)
+          // Use a more efficient counter increment for high volume
+          await incrementMessageCounter(streamId)
         }
       } catch (error) {
         console.error("Send message error:", error)
@@ -904,50 +1074,101 @@ module.exports = async function setupSocketIO(server) {
     })
   })
 
-  // Helper functions for Redis operations
-  async function incrementViewerCount(streamId) {
-    const key = `viewers:${streamId}`
-    const count = await redisClient.incr(key)
-    await redisClient.expire(key, 3600) // 1 hour TTL
-    return Number.parseInt(count)
+  async function checkRateLimit(userId, streamId) {
+    return await chatRateLimiter.checkLimit(userId, streamId)
   }
 
-  async function decrementViewerCount(streamId) {
-    const key = `viewers:${streamId}`
-    const count = await redisClient.decr(key)
-    // If count is 0 or negative, delete the key to clean up
-    if (count <= 0) {
-      await redisClient.del(key)
-      return 0
+  // Helper function to get a shard key for a stream
+  // This helps distribute data across Redis instances for high-volume streams
+  function getStreamShard(streamId) {
+    // Simple sharding based on the last character of the streamId
+    // In production, you would use a more sophisticated sharding strategy
+    return streamId.slice(-1).charCodeAt(0) % 10
+  }
+
+  // More efficient counter increment for high message volumes
+  async function incrementMessageCounter(streamId) {
+    // Use a batched counter approach to reduce Redis operations
+    const counterKey = `msgcount:${streamId}`
+    const batchKey = `msgcount:batch:${streamId}`
+
+    // Increment the batch counter
+    await redisClient.incr(batchKey)
+
+    // Every 100 messages, update the main counter and reset the batch
+    const batchCount = await redisClient.get(batchKey)
+    if (batchCount && Number.parseInt(batchCount) >= 100) {
+      await redisClient.incrby(counterKey, Number.parseInt(batchCount))
+      await redisClient.set(batchKey, 0)
+
+      // Update the stream metrics in MongoDB in batches
+      streamController
+        .incrementMessageCountBatch(streamId, Number.parseInt(batchCount))
+        .catch((err) => console.error(`Failed to update message count for ${streamId}:`, err))
     }
-    return Number.parseInt(count)
   }
 
-  async function storeMessage(streamId, message) {
-    const key = `messages:${streamId}`
+  async function storeMessage(key, message) {
+    // Use pipeline for better performance with high message volumes
     await redisClient
       .multi()
       .zadd(key, message.timestamp, JSON.stringify(message))
       .zremrangebyrank(key, 0, -101) // Keep only the latest 100 messages
       .expire(key, 86400) // 24 hours TTL
       .exec()
+
+    // For extremely high volume streams, we can also implement message archiving
+    // This would move older messages to a more permanent storage solution
+    if (Math.random() < 0.01) {
+      // 1% chance to check if archiving is needed
+      checkMessageArchiving(key).catch((err) => console.error(`Error checking message archiving for ${key}:`, err))
+    }
+  }
+
+  // Function to check if messages need to be archived
+  async function checkMessageArchiving(key) {
+    // Get count of messages in this stream
+    const count = await redisClient.zcard(key)
+
+    // If we have a lot of messages, archive the older ones
+    if (count > 1000) {
+      // In a real implementation, this would move older messages to a database
+      // For now, we'll just log that archiving would happen
+      console.log(`Would archive older messages for ${key}, current count: ${count}`)
+
+      // In production, you would:
+      // 1. Get the oldest messages
+      // 2. Store them in a database
+      // 3. Remove them from Redis
+    }
+  }
+
+  // Set up Redis pub/sub for chat messages
+  // This is more efficient than Socket.IO rooms for very high volumes
+  function setupRedisPubSub(io) {
+    const subscriber = redisSubClient.duplicate()
+
+    subscriber.on("message", (channel, message) => {
+      if (channel.startsWith("chat:")) {
+        const streamId = channel.split(":")[1]
+        const data = JSON.parse(message)
+
+        // Broadcast to all clients in the stream room
+        io.to(`stream:${streamId}`).emit(data.type, data.message)
+      }
+    })
+
+    // Subscribe to all chat channels
+    subscriber.psubscribe("chat:*")
+
+    return subscriber
   }
 
   async function getRecentMessages(streamId) {
-    const key = `messages:${streamId}`
+    const streamShard = getStreamShard(streamId)
+    const key = `messages:${streamShard}:${streamId}`
     const messages = await redisClient.zrevrange(key, 0, 49) // Get latest 50 messages
     return messages.map((msg) => JSON.parse(msg)).reverse() // Oldest first
-  }
-
-  async function checkRateLimit(userId, streamId) {
-    const key = `ratelimit:chat:${userId}:${streamId}`
-    const count = await redisClient.incr(key)
-
-    if (count === 1) {
-      await redisClient.expire(key, 10) // 10 seconds window
-    }
-
-    return count <= 5 // 5 messages per 10 seconds
   }
 
   // Reset all viewer counts
@@ -973,6 +1194,21 @@ module.exports = async function setupSocketIO(server) {
         }
         console.log(`Reset ${viewerKeys.length} viewer tracking keys on server start`)
       }
+
+      // Set all active streams to have 0 viewers
+      const streamIds = await Stream.distinct("streamId")
+      for (const streamId of streamIds) {
+        await viewerCounter.resetViewerCount(streamId)
+        // Broadcast the reset count
+        io.emit("viewer_count", { streamId, count: 0 })
+      }
+
+      // Also set test streams to 0
+      const testStreamIds = ["stream-1", "stream-2", "stream-3", "stream-4", "default-stream"]
+      for (const streamId of testStreamIds) {
+        await viewerCounter.resetViewerCount(streamId)
+        io.emit("viewer_count", { streamId, count: 0 })
+      }
     } catch (error) {
       console.error("Error resetting viewer counts:", error)
     }
@@ -993,24 +1229,15 @@ module.exports = async function setupSocketIO(server) {
         }
       }
 
-      // For each stream, count active viewers and update the count
+      // For each stream, sync the viewer count with the actual number of active viewers
       for (const streamId of streamIds) {
-        const streamViewerKeys = viewerKeys.filter((key) => key.startsWith(`viewer:${streamId}:`))
-        const activeViewers = streamViewerKeys.length
-
-        // Update the viewer count in Redis
-        const key = `viewers:${streamId}`
-        if (activeViewers === 0) {
-          // No active viewers, delete the key
-          await redisClient.del(key)
-        } else {
-          // Set the count to the number of active viewers
-          await redisClient.set(key, activeViewers.toString())
-          await redisClient.expire(key, 3600) // 1 hour TTL
-        }
+        // Use the viewerCounter utility to sync the count
+        const activeViewers = await viewerCounter.syncViewerCount(streamId)
 
         // Broadcast the updated count
         io.emit("viewer_count", { streamId, count: activeViewers })
+
+        console.log(`Synced viewer count for ${streamId}: ${activeViewers}`)
       }
 
       console.log(`Cleaned up viewer counts for ${streamIds.size} streams`)
@@ -1019,6 +1246,44 @@ module.exports = async function setupSocketIO(server) {
     }
   }
 
+  // Create API endpoint for synchronous decrements (for beforeunload events)
+  server.on("request", async (req, res) => {
+    if (req.method === "POST" && req.url.startsWith("/api/viewer/decrement/")) {
+      try {
+        const streamId = req.url.split("/").pop()
+        if (!streamId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ success: false, message: "Stream ID required" }))
+          return
+        }
+
+        // Decrement the viewer count using the viewerCounter utility
+        const newCount = await viewerCounter.decrementViewers(streamId)
+
+        // Broadcast the updated count
+        io.emit("viewer_count", { streamId, count: newCount })
+
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ success: true, viewerCount: newCount }))
+      } catch (error) {
+        console.error("Error in sync decrement:", error)
+        res.writeHead(500)
+        res.end(JSON.stringify({ success: false, message: "Server error" }))
+      }
+    }
+  })
+
+  // Make sure to clean up the subscriber when the server shuts down
+  process.on("SIGTERM", () => {
+    chatSubscriber.punsubscribe()
+    chatSubscriber.quit()
+  })
+
   return io
 }
+
+
+
+
+
 

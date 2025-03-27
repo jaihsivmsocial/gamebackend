@@ -1,5 +1,5 @@
 const { RTCPeerConnection, RTCSessionDescription } = require("wrtc")
-const { redisClient } = require("../config/redis")
+const { redisClient, viewerCounter } = require("../config/redis")
 const mongoose = require("mongoose")
 
 // Helper function to check if a string is a valid MongoDB ObjectId
@@ -42,6 +42,9 @@ class WebRTCService {
         startTime: Date.now(),
         active: true,
       })
+
+      // Initialize viewer count to 0
+      await viewerCounter.resetViewerCount(streamId)
 
       return { success: true, streamId }
     } catch (error) {
@@ -94,6 +97,13 @@ class WebRTCService {
       if (!stream) {
         // For test streams that don't exist in memory, create a dummy offer
         if (!isValidObjectId(streamId) || streamId.startsWith("stream-") || streamId === "default-stream") {
+          // Increment viewer count
+          await viewerCounter.incrementViewers(streamId)
+
+          // Store viewer key for tracking
+          const viewerKey = `viewer:${streamId}:${userId}`
+          await redisClient.set(viewerKey, "1", "EX", 120) // 2 minutes TTL
+
           return {
             success: true,
             offer: {
@@ -123,6 +133,13 @@ class WebRTCService {
 
       // Add viewer to stream's viewer set
       stream.viewers.add(userId)
+
+      // Increment viewer count
+      await viewerCounter.incrementViewers(streamId)
+
+      // Store viewer key for tracking
+      const redisViewerKey = `viewer:${streamId}:${userId}`
+      await redisClient.set(redisViewerKey, "1", "EX", 120) // 2 minutes TTL
 
       // Create offer for viewer
       const offer = await peerConnection.createOffer()
@@ -227,8 +244,18 @@ class WebRTCService {
         if (viewer.streamId === streamId) {
           viewer.peerConnection.close()
           this.viewers.delete(key)
+
+          // Decrement viewer count for each disconnected viewer
+          await viewerCounter.decrementViewers(streamId)
+
+          // Remove viewer tracking key
+          const viewerTrackingKey = `viewer:${streamId}:${viewer.userId}`
+          await redisClient.del(viewerTrackingKey)
         }
       }
+
+      // Reset viewer count to 0
+      await viewerCounter.resetViewerCount(streamId)
 
       return { success: true }
     } catch (error) {
@@ -240,8 +267,14 @@ class WebRTCService {
   // Disconnect viewer
   async disconnectViewer(streamId, userId) {
     try {
-      // For test streams, just return success
+      // For test streams, just return success but still decrement the count
       if (!isValidObjectId(streamId) || streamId.startsWith("stream-") || streamId === "default-stream") {
+        await viewerCounter.decrementViewers(streamId)
+
+        // Remove viewer tracking key
+        const viewerTrackingKey = `viewer:${streamId}:${userId}`
+        await redisClient.del(viewerTrackingKey)
+
         return { success: true }
       }
 
@@ -264,6 +297,13 @@ class WebRTCService {
         stream.viewers.delete(userId)
       }
 
+      // Decrement viewer count
+      await viewerCounter.decrementViewers(streamId)
+
+      // Remove viewer tracking key
+      const viewerTrackingKey = `viewer:${streamId}:${userId}`
+      await redisClient.del(viewerTrackingKey)
+
       return { success: true }
     } catch (error) {
       console.error("Error disconnecting viewer:", error)
@@ -276,14 +316,14 @@ class WebRTCService {
     try {
       // For test streams, return dummy stats
       if (!isValidObjectId(streamId) || streamId.startsWith("stream-") || streamId === "default-stream") {
-        const viewerCount = (await redisClient.get(`viewers:${streamId}`)) || 0
+        const viewerCount = await viewerCounter.getViewerCount(streamId)
         return {
           success: true,
           stats: {
             streamId,
-            viewerCount: Number.parseInt(viewerCount),
-            peakViewers: Number.parseInt(viewerCount),
-            totalViewers: Number.parseInt(viewerCount) * 2, // Just a dummy calculation
+            viewerCount,
+            peakViewers: viewerCount,
+            totalViewers: viewerCount * 2, // Just a dummy calculation
             duration: 3600, // 1 hour in seconds
           },
         }
@@ -295,12 +335,15 @@ class WebRTCService {
         return { success: false, error: "Stream not found" }
       }
 
+      // Get the current viewer count
+      const viewerCount = await viewerCounter.getViewerCount(streamId)
+
       return {
         success: true,
         stats: {
           streamId,
           userId: stream.userId,
-          viewerCount: stream.viewers.size,
+          viewerCount,
           startTime: stream.startTime,
           duration: Date.now() - stream.startTime,
         },

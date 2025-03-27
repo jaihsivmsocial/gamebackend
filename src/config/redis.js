@@ -73,7 +73,7 @@ const chatRateLimiter = {
       await redisClient.expire(key, 10) // 10 seconds window
     }
 
-    return count <= 5 // 5 messages per 10 seconds
+    return count <= 20 // 5 messages per 10 seconds
   },
 }
 
