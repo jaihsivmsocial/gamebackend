@@ -32,8 +32,7 @@ app.use(
       process.env.FRONTEND_URL || "http://localhost:3000",
       "http://test.tribez.gg",
       "http://www.test.tribez.gg",
-      "http://13.60.238.38",
-      ""
+      "http://13.48.135.112",
     ],
     credentials: true, 
   })
