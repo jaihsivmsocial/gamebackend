@@ -1,51 +1,47 @@
-const nodemailer=require ("nodemailer")
+import nodemailer from "nodemailer"
 
-// Configure email transporter
+// Create reusable transporter
 const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
-  port: process.env.EMAIL_PORT,
-  secure: process.env.EMAIL_SECURE === "true",
+  service: "gmail",
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
+    user: process.env.EMAIL_USER || "jaishivkumar1999@gmail.com",
+    pass: process.env.EMAIL_PASS || "scyz eskz lmov lobe", 
+  },
+  tls: {
+    rejectUnauthorized: false,
   },
 })
 
-// Send verification email
-exports. sendVerificationEmail = async (email, token) => {
-  const verificationUrl = `${process.env.CLIENT_URL}/verify-email/${token}`
-
+/**
+ * Send OTP email for password reset
+ */
+export const sendOtpEmail = async (email, otp, username = "User") => {
   const mailOptions = {
-    from: process.env.EMAIL_FROM,
+    from: process.env.EMAIL_USER || "jaishivkumar1999@gmail.com",
     to: email,
-    subject: "Email Verification",
+    subject: "Your OTP Code for Password Reset",
     html: `
-      <h1>Verify Your Email</h1>
-      <p>Please click the link below to verify your email address:</p>
-      <a href="${verificationUrl}">Verify Email</a>
-      <p>If you did not request this, please ignore this email.</p>
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
+        <h2 style="color: #333;">Password Reset Request</h2>
+        <p>Hello ${username},</p>
+        <p>We received a request to reset your password. Please use the following OTP (One-Time Password) to complete the process:</p>
+        <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; text-align: center; font-size: 24px; letter-spacing: 5px; font-weight: bold;">
+          ${otp}
+        </div>
+        <p>This OTP will expire in 15 minutes.</p>
+        <p>If you didn't request this password reset, please ignore this email or contact support if you have concerns.</p>
+        <p>Thank you,<br>Your App Team</p>
+      </div>
     `,
   }
 
-  await transporter.sendMail(mailOptions)
-}
-
-// Send password reset email
-export const sendPasswordResetEmail = async (email, token) => {
-  const resetUrl = `${process.env.CLIENT_URL}/reset-password/${token}`
-
-  const mailOptions = {
-    from: process.env.EMAIL_FROM,
-    to: email,
-    subject: "Password Reset",
-    html: `
-      <h1>Reset Your Password</h1>
-      <p>Please click the link below to reset your password:</p>
-      <a href="${resetUrl}">Reset Password</a>
-      <p>If you did not request this, please ignore this email.</p>
-    `,
+  try {
+    const info = await transporter.sendMail(mailOptions)
+    console.log("OTP email sent:", info.response)
+    return info
+  } catch (error) {
+    console.error("Email sending error:", error)
+    throw error
   }
-
-  await transporter.sendMail(mailOptions)
 }
 

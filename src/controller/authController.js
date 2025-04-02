@@ -3,6 +3,8 @@ const User = require("../model/userModel");
 const bcrypt = require("bcrypt");  // Use bcrypt properly
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const {sendOtpEmail}= require('../utils/email')
+
 
 exports.register = async (req, res) => {
   try {
@@ -158,96 +160,176 @@ exports. checkUsername = async (req, res) => {
   }
 }
 
-// Verify email
-exports. verifyEmail = async (req, res) => {
-  try {
-    const { token } = req.params
 
-    const user = await User.findOne({
-      verificationToken: token,
-      verificationTokenExpires: { $gt: Date.now() },
-    })
 
-    if (!user) {
-      return res.status(400).json({ message: "Invalid or expired verification token" })
-    }
 
-    user.isVerified = true
-    user.verificationToken = undefined
-    user.verificationTokenExpires = undefined
 
-    await user.save()
 
-    res.status(200).json({ message: "Email verified successfully. You can now log in." })
-  } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message })
-  }
-}
 
-exports . getprofile= async(req,res)=>{
-  try {
-    const user = await User.findById(req.user.id).select("-password")
-    if (!user) {
-      return res.status(404).json({ message: "User not found" })
-    }
-
-    res.status(200).json({ user })
-  } catch (error) {
-    console.error("Get profile error:", error)
-    res.status(500).json({ message: "Server error" })
-  }
-}
-
-// Request password reset
 exports. forgotPassword = async (req, res) => {
   try {
     const { email } = req.body
 
-    const user = await User.findOne({ email })
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" })
+    }
+
+    const user = await User.findOne({
+      email: { $regex: new RegExp("^" + email + "$", "i") },
+    })
+
     if (!user) {
       return res.status(404).json({ message: "User not found" })
     }
 
-    // Generate reset token
-    const resetToken = crypto.randomBytes(32).toString("hex")
-    user.resetPasswordToken = resetToken
-    user.resetPasswordExpires = Date.now() + 3600000 // 1 hour
+    // Generate a 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString()
 
+    // Hash the OTP before storing it
+    const salt = await bcrypt.genSalt(10)
+    const hashedOtp = await bcrypt.hash(otp, salt)
+
+    // Set OTP and expiration (15 minutes)
+    user.resetPasswordToken = hashedOtp
+    user.resetPasswordExpires = Date.now() + 15 * 60 * 1000 // 15 minutes
     await user.save()
 
-    // Send password reset email
-    await sendPasswordResetEmail(user.email, resetToken)
+    await sendOtpEmail(user.email, otp, user.username)
 
-    res.status(200).json({ message: "Password reset email sent" })
+    res.status(200).json({
+      message: "OTP sent to your email",
+      // Only include OTP in development environment for testing
+      testOtp: process.env.NODE_ENV === "development" ? otp : undefined,
+    })
   } catch (error) {
+    console.error("Forgot password error:", error)
     res.status(500).json({ message: "Server error", error: error.message })
   }
 }
 
-// Reset password
-exports. resetPassword = async (req, res) => {
-  try {
-    const { token } = req.params
-    const { password } = req.body
 
+exports. requestOtpReset = async (req, res) => {
+  try {
+    const { email } = req.body
+    console.log("OTP reset request for email:", email)
+
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" })
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: "Invalid email format" })
+    }
+
+    // Find user in the database (case-insensitive search)
     const user = await User.findOne({
-      resetPasswordToken: token,
-      resetPasswordExpires: { $gt: Date.now() },
+      email: { $regex: new RegExp("^" + email + "$", "i") },
     })
 
     if (!user) {
-      return res.status(400).json({ message: "Invalid or expired reset token" })
+      return res.status(404).json({ message: "User not found" })
     }
 
-    user.password = password
+    // Check if current OTP is still valid
+    const isOtpValid = user.resetPasswordExpires && user.resetPasswordExpires > Date.now()
+
+    // If OTP is still valid and not in development mode, don't generate a new one
+    if (isOtpValid && process.env.NODE_ENV !== "development") {
+      return res.status(200).json({
+        message: "A valid OTP has already been sent to your email. Please check your inbox or spam folder.",
+      })
+    }
+
+    // Generate a new 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString()
+
+    // Hash the OTP before storing it
+    const salt = await bcrypt.genSalt(10)
+    const hashedOtp = await bcrypt.hash(otp, salt)
+
+    // Set OTP and expiration (15 minutes)
+    user.resetPasswordToken = hashedOtp
+    user.resetPasswordExpires = Date.now() + 15 * 60 * 1000 // 15 minutes
+    await user.save()
+
+    // Send OTP via email
+    await sendOtpEmail(email, otp, user.username)
+
+    res.status(200).json({
+      message: "New OTP sent to your email",
+      // Only include OTP in development environment for testing
+      testOtp: process.env.NODE_ENV === "development" ? otp : undefined,
+    })
+  } catch (error) {
+    console.error("OTP request error:", error)
+    res.status(500).json({ message: "Server error", error: error.message })
+  }
+}
+
+exports.verifyOtpAndResetPassword = async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body
+
+    console.log("Verifying OTP for:", email)
+    console.log("OTP received:", otp)
+    console.log("New password length:", newPassword?.length)
+
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({
+        message: "Email, OTP, and new password are required",
+      })
+    }
+
+    // Find user with valid reset token - use case-insensitive search
+    const user = await User.findOne({
+      email: { $regex: new RegExp("^" + email + "$", "i") },
+    })
+
+    if (!user) {
+      console.log("User not found for email:", email)
+      return res.status(404).json({ message: "User not found" })
+    }
+
+    // Check if OTP is expired
+    if (!user.resetPasswordExpires || user.resetPasswordExpires < Date.now()) {
+      console.log("OTP expired. Expiry time:", user.resetPasswordExpires, "Current time:", Date.now())
+      return res.status(400).json({
+        message: "OTP has expired. Please request a new OTP.",
+      })
+    }
+
+    console.log("Stored hashed OTP:", user.resetPasswordToken)
+
+    // Verify OTP
+    const isValidOtp = await bcrypt.compare(otp, user.resetPasswordToken)
+    console.log("OTP validation result:", isValidOtp)
+
+    if (!isValidOtp) {
+      return res.status(400).json({ message: "Invalid OTP" })
+    }
+
+    // Validate password strength
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        message: "Password must be at least 8 characters long",
+      })
+    }
+
+    // Hash the new password
+    const salt = await bcrypt.genSalt(10)
+    const hashedPassword = await bcrypt.hash(newPassword, salt)
+
+    // Update user password
+    user.password = hashedPassword
     user.resetPasswordToken = undefined
     user.resetPasswordExpires = undefined
-
     await user.save()
 
     res.status(200).json({ message: "Password reset successful" })
   } catch (error) {
+    console.error("OTP verification error:", error)
     res.status(500).json({ message: "Server error", error: error.message })
   }
 }
-

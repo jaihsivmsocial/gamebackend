@@ -1,26 +1,27 @@
-const express = require("express");
-const { register, login, checkUsername,
-    verifyEmail,
-    forgotPassword,
-    resetPassword,
-    updateProfile, } = require("../controller/authController");
-const authMiddleware = require("../middleware/authMiddleware");
-const router = express.Router();
+const express = require("express")
+const {
+  register,
+  login,
+  checkUsername,
 
+  forgotPassword,
 
-router.post("/register", register);
-router.post("/login", login);
-router.put("/updateProfile",authMiddleware, updateProfile)
-router.get("/check-username/:username", checkUsername)
-router.get("/verify-email/:token", verifyEmail)
+  requestOtpReset,
+  verifyOtpAndResetPassword,
+} = require("../controller/authController")
+const authMiddleware = require("../middleware/authMiddleware")
+const router = express.Router()
+
+// Auth routes
+router.post("/register", register)
+router.post("/login", login)
+// router.put("/updateProfile", authMiddleware, updateProfile)
+router.get("/1/:username", checkUsername)
 router.post("/forgot-password", forgotPassword)
-router.post("/reset-password/:token", resetPassword)
+router.post("/request-otp-reset", requestOtpReset)
+router.post("/verify-otp-reset", verifyOtpAndResetPassword)
 
-// 
+// router.post("/playfab-password-reset", handlePlayFabCloudScript)
 
+module.exports = router
 
-// router.post("/sendmessages", authMiddleware, sendMessage)
-// router.get("/messages", authMiddleware, getMessages);
-
- 
-module.exports = router;

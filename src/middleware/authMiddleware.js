@@ -16,8 +16,9 @@ const authenticate = async (req, res, next) => {
       return res.status(404).json({ message: "User not found" });
     }
 
+    // Change this to match what your controller expects
     req.user = {
-      id: user._id,
+      _id: user._id,  // Changed from 'id' to '_id'
       username: user.username,
     };
 
