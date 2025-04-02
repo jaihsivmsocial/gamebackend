@@ -11,6 +11,7 @@
   "description": "",
   "dependencies": {
     "@socket.io/redis-adapter": "^8.3.0",
+    "aws-sdk": "^2.1692.0",
     "bcrypt": "^5.1.1",
     "bcryptjs": "^3.0.2",
     "body-parser": "^1.20.3",
@@ -28,8 +29,10 @@
     "nanoid": "^5.1.5",
     "nodemailer": "^6.10.0",
     "npm": "^11.2.0",
+    "playfab-sdk": "^2.170.250314",
     "rate-limit": "^0.1.1",
     "redis": "^4.7.0",
+    "resend": "^4.2.0",
     "socket.io": "^4.8.1",
     "wrtc": "^0.4.7"
   }
