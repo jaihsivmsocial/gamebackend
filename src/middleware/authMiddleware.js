@@ -1,34 +1,58 @@
-const jwt = require("jsonwebtoken");
-const User = require("../model/userModel");
+const jwt = require("jsonwebtoken")
+const User = require("../model/userModel")
 
 const authenticate = async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.split(" ")[1];
+    // Check for token in multiple places
+    let token
+
+    // Check Authorization header
+    const authHeader = req.headers.authorization
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      token = authHeader.split(" ")[1]
+    }
+    // Check cookies as fallback
+    else if (req.cookies && req.cookies.authData) {
+      try {
+        const cookieData = JSON.parse(req.cookies.authData)
+        token = cookieData.token
+      } catch (e) {
+        console.error("Error parsing cookie:", e)
+      }
+    }
 
     if (!token) {
-      return res.status(401).json({ message: "Authentication required" });
+      console.log("No authentication token found")
+      return res.status(401).json({ message: "Authentication required" })
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).select("-password");
+    // Add debugging for token verification
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET)
+      console.log("Token verified successfully for user ID:", decoded.id)
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
+      const user = await User.findById(decoded.id).select("-password")
+
+      if (!user) {
+        console.log("User not found for ID:", decoded.id)
+        return res.status(404).json({ message: "User not found" })
+      }
+
+      req.user = {
+        id: user._id,
+        username: user.username,
+      }
+
+      next()
+    } catch (jwtError) {
+      console.error("JWT verification error:", jwtError.message)
+      return res.status(401).json({ message: "Invalid or expired token" })
     }
-
-    // Change this to match what your controller expects
-    req.user = {
-      _id: user._id,  // Changed from 'id' to '_id'
-      username: user.username,
-    };
-
-    next();
   } catch (error) {
-    console.error("Authentication error:", error);
-    res.status(401).json({ message: "Invalid token" });
+    console.error("Authentication error:", error)
+    res.status(401).json({ message: "Authentication failed" })
   }
-};
+}
 
-// Export using CommonJS
+module.exports = authenticate
 
-module.exports= authenticate
