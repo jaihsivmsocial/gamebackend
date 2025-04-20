@@ -641,19 +641,19 @@
 //   return io
 // }
 
+
+
 const { Server } = require("socket.io")
 const { createAdapter } = require("@socket.io/redis-adapter")
 const { redisClient, redisPubClient, redisSubClient, viewerCounter, chatRateLimiter } = require("../config/redis")
 const Stream = require("../model/streamModel")
-// const { nanoid } = require("nanoid")
+const cron = require("node-cron")
 const mongoose = require("mongoose")
 const streamController = require("../controller/stream-controller")
-// const chatRateLimiter = require("../utils/rateLimiter") // Import the rate limiter
-
-async function generateId() {
-  const { nanoid } = await import("nanoid")
-  console.log(nanoid())
-}
+const jwt = require("jsonwebtoken")
+const User = require("../model/userModel")
+ const BetQuestion= require("../model/battingModel/BetQuestion")
+const questionTimers = new Map()
 
 // Helper function for default avatars
 function getDefaultAvatar(anonymousId, username) {
@@ -669,9 +669,49 @@ function isValidObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id)
 }
 
+// Helper function to generate random questions for betting
+const generateRandomQuestion = () => {
+  const subjects = [
+    "James5423",
+    "Alex98",
+    "NinjaWarrior",
+    "StreamQueen",
+    "ProGamer42",
+    "MasterChief",
+    "ShadowHunter",
+    "DragonSlayer",
+    "PixelPirate",
+    "CyberNinja",
+  ]
+
+  const conditions = [
+    "survive for 5 minutes",
+    "defeat the boss",
+    "reach the checkpoint",
+    "collect 10 coins",
+    "find the hidden treasure",
+    "escape the dungeon",
+    "win the next battle",
+    "avoid damage for 2 minutes",
+    "complete the mission",
+    "reach level 10",
+  ]
+
+  const randomSubject = subjects[Math.floor(Math.random() * subjects.length)]
+  const randomCondition = conditions[Math.floor(Math.random() * conditions.length)]
+
+  return {
+    subject: randomSubject,
+    condition: randomCondition,
+  }
+}
+
+// Global io instance
+let io
+
 module.exports = async function setupSocketIO(server) {
   // Create Socket.IO server with Redis adapter for horizontal scaling
-  const io = new Server(server, {
+  io = new Server(server, {
     cors: {
       origin: process.env.FRONTEND_URL || "http://localhost:3000",
       methods: ["GET", "POST"],
@@ -693,32 +733,54 @@ module.exports = async function setupSocketIO(server) {
   // Set up a periodic cleanup task to remove stale viewers
   setInterval(cleanupStaleViewers, 60 * 1000) // Run every minute for more frequent cleanup
 
+  // Setup automated question generation for betting
+  setupQuestionGenerator()
+
   // Middleware to set up user data
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const token = socket.handshake.auth.token
-      const anonymousId = socket.handshake.auth.anonymousId || `anon-${generateId(8)}`
+      const anonymousId = socket.handshake.auth.anonymousId || `anon-${Math.random().toString(36).substring(2, 10)}`
       const customUsername = socket.handshake.auth.customUsername || "Anonymous"
       const customProfilePicture = socket.handshake.auth.customProfilePicture
 
       // Set up user object
       if (token) {
         try {
-          // For authenticated users, verify token and get user info
-          // This is simplified - in production you would verify the JWT
-          socket.user = {
-            id: "user-id-from-token",
-            username: "username-from-token",
-            profilePicture: "/placeholder.svg?height=30&width=30", // Use a valid URL format
-            isAnonymous: false,
+          // Verify JWT token using the same method as your auth middleware
+          const decoded = jwt.verify(token, process.env.JWT_SECRET || "fallback_secret_for_development")
+
+          // Find user in database
+          const user = await User.findById(decoded.id).select("-password")
+
+          if (user) {
+            // For authenticated users, use their actual user data
+            socket.user = {
+              id: user._id.toString(), // Convert ObjectId to string
+              username: user.username,
+              profilePicture: user.profilePicture || "/placeholder.svg?height=30&width=30",
+              isAnonymous: false,
+              isAuthenticated: true,
+            }
+          } else {
+            // Token valid but user not found, use custom profile
+            socket.user = {
+              id: anonymousId,
+              username: customUsername,
+              profilePicture: customProfilePicture || getDefaultAvatar(anonymousId, customUsername),
+              isAnonymous: true,
+              isAuthenticated: false,
+            }
           }
         } catch (error) {
+          console.error("Socket auth error:", error.message)
           // Token verification failed, use custom profile
           socket.user = {
             id: anonymousId,
             username: customUsername,
             profilePicture: customProfilePicture || getDefaultAvatar(anonymousId, customUsername),
             isAnonymous: true,
+            isAuthenticated: false,
           }
         }
       } else {
@@ -728,11 +790,13 @@ module.exports = async function setupSocketIO(server) {
           username: customUsername,
           profilePicture: customProfilePicture || getDefaultAvatar(anonymousId, customUsername),
           isAnonymous: true,
+          isAuthenticated: false,
         }
       }
 
       next()
     } catch (error) {
+      console.error("Socket authentication error:", error)
       next(new Error("Authentication failed"))
     }
   })
@@ -817,6 +881,9 @@ module.exports = async function setupSocketIO(server) {
         if (recentMessages.length > 0) {
           socket.emit("recent_messages", recentMessages)
         }
+
+        // Send current active betting question if available
+        sendActiveQuestion(socket, streamId)
       } catch (error) {
         console.error("Join stream error:", error)
         socket.emit("error", { message: "Failed to join stream" })
@@ -1007,7 +1074,7 @@ module.exports = async function setupSocketIO(server) {
           return
         }
 
-        const messageId = `msg-${Date.now()}-${generateId(6)}`
+        const messageId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`
         const timestamp = Date.now()
 
         // Get the real username from socket.handshake.auth if available
@@ -1071,6 +1138,137 @@ module.exports = async function setupSocketIO(server) {
     socket.on("select_camera", ({ streamId, cameraId }) => {
       // This is just for UI state, no backend processing needed
       console.log(`User ${socket.id} selected camera ${cameraId} for stream ${streamId}`)
+    })
+
+    // ==================== BETTING SYSTEM SOCKET EVENTS ====================
+
+    // Place a bet
+    socket.on("place_bet", async ({ questionId, choice, amount }) => {
+      try {
+        console.log(`User ${socket.id} placing bet on question ${questionId}: ${choice} for ${amount}`)
+
+        // Check if user is authenticated
+        if (!socket.user.isAuthenticated) {
+          socket.emit("error", {
+            message: "Authentication required to place bets",
+            code: "AUTH_REQUIRED",
+          })
+          return
+        }
+
+        // Find the question
+        const question = await BetQuestion.findById(questionId)
+        if (!question) {
+          socket.emit("error", { message: "Question not found" })
+          return
+        }
+
+        // Calculate new percentages based on this bet
+        let totalYesAmount = 0
+        let totalNoAmount = 0
+
+        // Get all existing bets for this question
+        const existingBets = await Bet.find({ questionId })
+
+        // Sum up existing bets by choice
+        existingBets.forEach((bet) => {
+          if (bet.choice === "Yes") {
+            totalYesAmount += bet.amount
+          } else if (bet.choice === "No") {
+            totalNoAmount += bet.amount
+          }
+        })
+
+        // Add the new bet
+        if (choice === "Yes") {
+          totalYesAmount += amount
+        } else if (choice === "No") {
+          totalNoAmount += amount
+        }
+
+        // Calculate new percentages
+        const totalAmount = totalYesAmount + totalNoAmount
+        let yesPercentage = 50
+        let noPercentage = 50
+
+        if (totalAmount > 0) {
+          yesPercentage = Math.round((totalYesAmount / totalAmount) * 100)
+          noPercentage = Math.round((totalNoAmount / totalAmount) * 100)
+
+          // Ensure percentages add up to 100%
+          if (yesPercentage + noPercentage !== 100) {
+            // Adjust to make sure they add up to 100%
+            if (yesPercentage > noPercentage) {
+              yesPercentage = 100 - noPercentage
+            } else {
+              noPercentage = 100 - yesPercentage
+            }
+          }
+        }
+
+        // Update the question with new percentages
+        question.yesPercentage = yesPercentage
+        question.noPercentage = noPercentage
+        question.totalBetAmount = (question.totalBetAmount || 0) + amount
+        question.totalPlayers = existingBets.length + 1 // This is simplified, should check for unique players
+
+        // Set a flag to indicate a bet was placed on this question
+        question.hasBets = true
+
+        await question.save()
+
+        // Emit confirmation to the user who placed the bet
+        socket.emit("bet_placed", {
+          success: true,
+          questionId,
+          choice,
+          amount,
+          timestamp: Date.now(),
+        })
+
+        // Broadcast bet update to all viewers with the new calculated percentages
+        io.emit("bet_update", {
+          questionId,
+          yesPercentage,
+          noPercentage,
+          totalBetAmount: question.totalBetAmount,
+          totalPlayers: question.totalPlayers,
+        })
+
+        // IMPORTANT: Immediately resolve the question after a bet is placed
+        console.log(`Bet placed, immediately resolving question ${questionId}`)
+
+        // Clear any existing timer for this question
+        if (questionTimers.has(questionId.toString())) {
+          clearTimeout(questionTimers.get(questionId.toString()))
+          questionTimers.delete(questionId.toString())
+        }
+
+        // Resolve the question immediately
+        await resolveQuestion(questionId)
+
+        // Generate a new question immediately
+        await generateNewQuestion(question.streamId)
+      } catch (error) {
+        console.error("Place bet error:", error)
+        socket.emit("error", { message: "Failed to place bet" })
+      }
+    })
+
+    // Request current betting question
+    socket.on("get_active_question", () => {
+      // Get streamId from socket rooms
+      const streamId =
+        Array.from(socket.rooms)
+          .find((room) => room.startsWith("stream:"))
+          ?.split(":")[1] || "default-stream"
+
+      sendActiveQuestion(socket, streamId)
+    })
+
+    // Request betting stats
+    socket.on("get_betting_stats", () => {
+      sendBettingStats(socket)
     })
   })
 
@@ -1246,6 +1444,338 @@ module.exports = async function setupSocketIO(server) {
     }
   }
 
+  // ==================== BETTING SYSTEM FUNCTIONS ====================
+
+  // Send active question to client
+  async function sendActiveQuestion(socket, streamId = "default-stream") {
+    try {
+      // Try to find an active question in the database for this stream
+      const activeQuestion = await BetQuestion.findOne({
+        active: true,
+        resolved: false,
+        endTime: { $gt: new Date() },
+        streamId: streamId,
+      })
+
+      if (activeQuestion) {
+        // Calculate actual percentages based on bets placed
+        let yesPercentage = 50
+        let noPercentage = 50
+
+        // If there are bets, calculate the actual percentages
+        if (activeQuestion.totalBetAmount > 0) {
+          // Find all bets for this question
+          const bets = await Bet.find({ questionId: activeQuestion._id })
+
+          if (bets && bets.length > 0) {
+            // Calculate total amount bet on Yes and No
+            let totalYesAmount = 0
+            let totalNoAmount = 0
+
+            bets.forEach((bet) => {
+              if (bet.choice === "Yes") {
+                totalYesAmount += bet.amount
+              } else if (bet.choice === "No") {
+                totalNoAmount += bet.amount
+              }
+            })
+
+            const totalAmount = totalYesAmount + totalNoAmount
+
+            // Calculate percentages if there are bets
+            if (totalAmount > 0) {
+              yesPercentage = Math.round((totalYesAmount / totalAmount) * 100)
+              noPercentage = Math.round((totalNoAmount / totalAmount) * 100)
+
+              // Ensure percentages add up to 100%
+              if (yesPercentage + noPercentage !== 100) {
+                // Adjust to make sure they add up to 100%
+                if (yesPercentage > noPercentage) {
+                  yesPercentage = 100 - noPercentage
+                } else {
+                  noPercentage = 100 - yesPercentage
+                }
+              }
+            }
+          }
+
+          // Update the question with the new percentages
+          activeQuestion.yesPercentage = yesPercentage
+          activeQuestion.noPercentage = noPercentage
+          await activeQuestion.save()
+        }
+
+        // Send the real active question from the database with calculated percentages
+        socket.emit("current_question", {
+          id: activeQuestion._id,
+          question: activeQuestion.question,
+          subject: activeQuestion.subject,
+          condition: activeQuestion.condition,
+          endTime: activeQuestion.endTime,
+          yesPercentage: yesPercentage,
+          noPercentage: noPercentage,
+          totalBetAmount: activeQuestion.totalBetAmount || 0,
+          totalPlayers: activeQuestion.totalPlayers || 0,
+        })
+
+        // Set a timer to resolve this question when it expires
+        const now = new Date()
+        const timeUntilEnd = activeQuestion.endTime - now
+
+        if (timeUntilEnd > 0) {
+          // Clear any existing timer for this question
+          if (questionTimers.has(activeQuestion._id.toString())) {
+            clearTimeout(questionTimers.get(activeQuestion._id.toString()))
+          }
+
+          // Set a new timer
+          const timerId = setTimeout(() => {
+            resolveQuestion(activeQuestion._id)
+          }, timeUntilEnd)
+
+          // Store the timer ID
+          questionTimers.set(activeQuestion._id.toString(), timerId)
+        }
+      } else {
+        // No active question found, create a new one
+        const now = new Date()
+        const endTime = new Date(now.getTime() + 36000) // 36 seconds from now
+
+        const { subject, condition } = generateRandomQuestion()
+        const questionText = `Will ${subject} ${condition}?`
+
+        // Create a new question in the database with initial 50/50 split
+        const newQuestion = new BetQuestion({
+          question: questionText,
+          subject,
+          condition,
+          startTime: now,
+          endTime,
+          active: true,
+          yesPercentage: 50,
+          noPercentage: 50,
+          totalBetAmount: 0,
+          totalPlayers: 0,
+          hasBets: false,
+          streamId: streamId, // Use the provided streamId
+        })
+
+        await newQuestion.save()
+
+        // Send the newly created question
+        socket.emit("current_question", {
+          id: newQuestion._id,
+          question: questionText,
+          subject: newQuestion.subject,
+          condition: newQuestion.condition,
+          endTime: newQuestion.endTime,
+          yesPercentage: 50, // Default for new question is fine
+          noPercentage: 50, // Default for new question is fine
+          totalBetAmount: 0,
+          totalPlayers: 0,
+        })
+
+        // Also broadcast to all clients
+        io.emit("new_question", {
+          id: newQuestion._id,
+          question: questionText,
+          subject: newQuestion.subject,
+          condition: newQuestion.condition,
+          endTime: newQuestion.endTime,
+          yesPercentage: 50,
+          noPercentage: 50,
+          totalBetAmount: 0,
+          totalPlayers: 0,
+        })
+
+        console.log("Created new question on demand:", questionText)
+
+        // Schedule question resolution after 36 seconds
+        const timerId = setTimeout(() => resolveQuestion(newQuestion._id), 36000)
+
+        // Store the timer ID
+        questionTimers.set(newQuestion._id.toString(), timerId)
+      }
+    } catch (error) {
+      console.error("Error sending active question:", error)
+
+      // Even if there's an error, send a fallback question
+      const now = new Date()
+      const endTime = new Date(now.getTime() + 36000) // 36 seconds from now
+
+      const { subject, condition } = generateRandomQuestion()
+      const questionText = `Will ${subject} ${condition}?`
+
+      const fallbackQuestion = {
+        id: `question-${Date.now()}`,
+        question: questionText,
+        subject,
+        condition,
+        endTime,
+        yesPercentage: 50,
+        noPercentage: 50,
+        totalBetAmount: 0,
+        totalPlayers: 0,
+      }
+
+      socket.emit("current_question", fallbackQuestion)
+    }
+  }
+
+  // Send betting stats to client
+  async function sendBettingStats(socket) {
+    try {
+      // In a real implementation, this would fetch from your database
+      // For now, we'll create mock stats
+      const stats = {
+        totalBetsAmount: Math.floor(Math.random() * 10000) + 5000,
+        biggestWinThisWeek: Math.floor(Math.random() * 2000) + 1000,
+        totalPlayers: Math.floor(Math.random() * 500) + 200,
+        activePlayers: Math.floor(Math.random() * 100) + 50,
+      }
+
+      socket.emit("betting_stats", stats)
+    } catch (error) {
+      console.error("Error sending betting stats:", error)
+    }
+  }
+
+  // Setup automated question generation
+  function setupQuestionGenerator() {
+    // Run every 36 seconds
+    cron.schedule("*/36 * * * * *", async () => {
+      try {
+        // Check if there's an active question
+        const activeQuestion = await BetQuestion.findOne({
+          active: true,
+          resolved: false,
+          endTime: { $gt: new Date() },
+        })
+
+        // Only generate a new question if there's no active one
+        if (!activeQuestion) {
+          // Get all active streams
+          const activeStreams = await Stream.find({ status: "active" }).distinct("streamId")
+
+          // If no active streams, use default
+          if (!activeStreams || activeStreams.length === 0) {
+            await generateNewQuestion("default-stream")
+          } else {
+            // Generate a question for each active stream
+            for (const streamId of activeStreams) {
+              await generateNewQuestion(streamId)
+            }
+          }
+        } else {
+          console.log("Active question exists, skipping generation")
+        }
+      } catch (error) {
+        console.error("Error in question generator cron job:", error)
+        // Even if there's an error, try to generate a question with default streamId
+        try {
+          await generateNewQuestion("default-stream")
+        } catch (fallbackError) {
+          console.error("Failed to generate fallback question:", fallbackError)
+        }
+      }
+    })
+  }
+
+  // Automatically resolve a question
+  async function resolveQuestion(questionId) {
+    try {
+      // Find the question in the database
+      const question = await BetQuestion.findById(questionId)
+
+      if (!question || question.resolved) {
+        console.log(`Question ${questionId} already resolved or not found`)
+        return
+      }
+
+      // Randomly determine outcome (50/50 chance)
+      const outcome = Math.random() < 0.5 ? "Yes" : "No"
+
+      // Emit socket event for question resolution
+      io.emit("question_resolved", {
+        questionId,
+        outcome,
+      })
+
+      console.log(`Question resolved: ${questionId} - Outcome: ${outcome}`)
+
+      // Mark the question as resolved
+      question.resolved = true
+      question.active = false
+      question.outcome = outcome
+      await question.save()
+
+      // Clear any timer for this question
+      if (questionTimers.has(questionId.toString())) {
+        clearTimeout(questionTimers.get(questionId.toString()))
+        questionTimers.delete(questionId.toString())
+      }
+    } catch (error) {
+      console.error("Error resolving question:", error)
+    }
+  }
+
+  // Create a separate function to generate a new question
+  async function generateNewQuestion(specificStreamId = null) {
+    try {
+      const { subject, condition } = generateRandomQuestion()
+      const questionText = `Will ${subject} ${condition}?`
+      const now = new Date()
+      const endTime = new Date(now.getTime() + 10000) // 36 seconds countdown
+
+      // Use provided streamId or default
+      const streamId = specificStreamId || "default-stream"
+
+      // Create a new question in the database
+      const newQuestion = new BetQuestion({
+        question: questionText,
+        subject,
+        condition,
+        startTime: now,
+        endTime,
+        active: true,
+        yesPercentage: 50,
+        noPercentage: 50,
+        totalBetAmount: 0,
+        totalPlayers: 0,
+        hasBets: false,
+        streamId: streamId, // Add the streamId
+      })
+
+      await newQuestion.save()
+
+      // Emit socket event for new question
+      io.emit("new_question", {
+        id: newQuestion._id,
+        question: questionText,
+        subject,
+        condition,
+        startTime: now,
+        endTime,
+        yesPercentage: 50,
+        noPercentage: 50,
+        totalBetAmount: 0,
+        totalPlayers: 0,
+      })
+
+      console.log("New betting question generated:", questionText)
+
+      // Schedule question resolution after 36 seconds
+      const timerId = setTimeout(() => resolveQuestion(newQuestion._id), 10000)
+
+      // Store the timer ID
+      questionTimers.set(newQuestion._id.toString(), timerId)
+
+      return newQuestion
+    } catch (error) {
+      console.error("Error generating new question:", error)
+    }
+  }
+
   // Create API endpoint for synchronous decrements (for beforeunload events)
   server.on("request", async (req, res) => {
     if (req.method === "POST" && req.url.startsWith("/api/viewer/decrement/")) {
@@ -1282,8 +1812,5 @@ module.exports = async function setupSocketIO(server) {
   return io
 }
 
-
-
-
-
-
+// Export io for use in other modules
+module.exports.io = io
