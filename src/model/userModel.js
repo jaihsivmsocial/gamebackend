@@ -53,7 +53,26 @@ const UserSchema = new mongoose.Schema(
       type: String,
       sparse: true,
     },
-
+    walletBalance: {
+      type: Number,
+      default: 300, 
+    },
+    totalBets: {
+      type: Number,
+      default: 0,
+    },
+    totalWins: {
+      type: Number,
+      default: 0,
+    },
+    biggestWin: {
+      type: Number,
+      default: 0,
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
     // Add these fields for password reset
     resetPasswordToken: String,
     resetPasswordExpires: Date,

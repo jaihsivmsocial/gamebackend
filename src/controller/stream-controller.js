@@ -106,7 +106,7 @@ exports.getStream = async (req, res) => {
     // Get viewer count from Redis
     const viewerCount = await viewerCounter.getViewerCount(streamId)
 
-    return res.status(200).json({
+    return res.status(200).json({           
       success: true,
       stream: {
         ...stream,
