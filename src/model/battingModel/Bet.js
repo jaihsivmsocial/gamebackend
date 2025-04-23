@@ -45,7 +45,7 @@ const BetSchema = new mongoose.Schema(
     },
     streamId: {
       type: String,
-      default: "default-stream", // Make streamId optional with a default value
+      default: "default-stream", 
     },
   },
   { timestamps: true },

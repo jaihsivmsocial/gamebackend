@@ -6,6 +6,8 @@ const {
   getActiveBetQuestion,
   getBetStats,
   getUserWalletBalance,
+  updateWalletBalance,
+  resetBalance
 } = require("../../controller/BetController/bet-controller.js")
 const  authenticate = require("../../middleware/authMiddleware.js")
 
@@ -27,10 +29,11 @@ router.get("/active", getActiveBetQuestion)
 // Get betting statistics
 router.get("/stats", getBetStats)
 
-router.get("/wallet", getUserWalletBalance)
-// router.post("/wallet/reset", resetBalance)
+router.get("/wallet",authenticate, getUserWalletBalance)
 
 
+router.post("/wallet/update", authenticate, updateWalletBalance)
+ router.post("/wallet/reset", authenticate, resetBalance)
 
 
 
