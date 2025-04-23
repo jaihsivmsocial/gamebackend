@@ -124,7 +124,7 @@ const setupSocketIO = require("./src/sockets/socket-manager.js")
 const streamRoutes = require("./src/routes/stream-routes.js")
 const messageRoutes = require("./src/routes/message-routes.js")
 const qualitySettingsRoutes = require("./src/routes/quality-routes.js")
-const questionRoutes = require("./src/routes/betroute/questionRoutes.js") // Added for betting questions
+const playerRoutes = require("./src/routes/betroute/player-route.js");
 
 // Load environment variables
 dotenv.config()
@@ -188,7 +188,7 @@ app.use("/api/bets", betRoutes)
 app.use("/api", streamRoutes)
 app.use("/api", messageRoutes)
 app.use("/api/quality-settings", qualitySettingsRoutes)
-app.use("/api/questions", questionRoutes) // Added for betting questions
+app.use("/api/players", playerRoutes);
 
 // Health check route
 app.get("/health", (req, res) => {
