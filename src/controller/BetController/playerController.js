@@ -112,32 +112,30 @@ exports.addKillToHolder = async (req, res) => {
 // Reset camera holder (when player dies)
 exports.resetCameraHolder = async (req, res) => {
   try {
-    // Find the current camera holder
-    const currentHolder = await Player.findOne({ 
-      CameraHolderName: { $ne: "None" } 
-    });
-
-    if (!currentHolder) {
-      return res.status(404).json({ message: "No active camera holder found" });
+    const { id } = req.params;
+    
+    // Find the player by ID
+    const player = await Player.findById(id);
+    
+    if (!player) {
+      return res.status(404).json({ message: "Player not found" });
     }
-
-    // Calculate hold duration
-    const endTime = new Date();
-    const holdDuration = Math.floor((endTime - currentHolder.CameraHoldStartTime) / 1000); // in seconds
     
-    // Update the player
-    currentHolder.CameraHolderName = "None";
-    currentHolder.LastHoldDuration = holdDuration;
-    currentHolder.TotalHoldTime = (currentHolder.TotalHoldTime || 0) + holdDuration;
-    currentHolder.CameraHoldStartTime = null;
+    // Reset all stats to zero
+    player.CameraHolderName = "None";
+    player.CameraHoldStartTime = null;
+    player.Kills = 0;
+    player.LastHoldDuration = 0;
+    player.TotalHoldTime = 0;
     
-    await currentHolder.save();
+    await player.save();
 
     res.json({ 
-      message: `Camera holder reset. ${currentHolder.CameraHolderName} held for ${holdDuration}s with ${currentHolder.Kills} kills`,
-      player: currentHolder 
+      message: `Player stats reset to zero`,
+      player: player
     });
   } catch (err) {
+    console.error("Error resetting player:", err);
     res.status(500).json({ error: err.message });
   }
 };
