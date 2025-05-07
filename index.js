@@ -125,7 +125,8 @@ const streamRoutes = require("./src/routes/stream-routes.js")
 const messageRoutes = require("./src/routes/message-routes.js")
 const qualitySettingsRoutes = require("./src/routes/quality-routes.js")
 const playerRoutes = require("./src/routes/betroute/player-route.js");
-
+const paymentRoutes = require("./src/routes/paymentRoute/payment-routes.js")
+const webhookRoutes = require("./src/routes/paymentRoute/webhookRoutes")
 // Load environment variables
 dotenv.config()
 
@@ -137,6 +138,20 @@ if (!process.env.JWT_SECRET) {
 
 // Initialize Express app
 const app = express()
+app.use((req, res, next) => {
+  if (req.originalUrl === "/api/payments/webhook") {
+    let rawBody = ""
+    req.on("data", (chunk) => {
+      rawBody += chunk.toString()
+    })
+    req.on("end", () => {
+      req.rawBody = rawBody
+      next()
+    })
+  } else {
+    next()
+  }
+})
 const server = http.createServer(app)
 
 // Security middleware
@@ -189,7 +204,8 @@ app.use("/api", streamRoutes)
 app.use("/api", messageRoutes)
 app.use("/api/quality-settings", qualitySettingsRoutes)
 app.use("/api/players", playerRoutes);
-
+app.use("/api/payments", paymentRoutes)
+app.use("/api/webhook", webhookRoutes)
 // Health check route
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok" })

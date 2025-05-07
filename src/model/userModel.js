@@ -55,7 +55,7 @@ const UserSchema = new mongoose.Schema(
     },
     walletBalance: {
       type: Number,
-      default: 300, 
+      // default: 300, 
     },
     totalBets: {
       type: Number,

@@ -7,12 +7,19 @@ const {
   getBetStats,
   getUserWalletBalance,
   updateWalletBalance,
-  resetBalance
+  resetBalance,
+  getPlatformFeeStats,
+  debugController,
+  loginHook,
+  placeBetWithPartialPayment,
 } = require("../../controller/BetController/bet-controller.js")
-const  authenticate = require("../../middleware/authMiddleware.js")
+const authenticate = require("../../middleware/authMiddleware.js")
 
 
 const router = express.Router()
+
+// Apply login hook to all routes
+router.use(loginHook)
 
 // Place a bet (protected route)
 router.post("/place", authenticate, placeBet)
@@ -29,12 +36,20 @@ router.get("/active", getActiveBetQuestion)
 // Get betting statistics
 router.get("/stats", getBetStats)
 
-router.get("/wallet",authenticate, getUserWalletBalance)
+// Get platform fee statistics (admin only)
+router.get("/platform-fees", authenticate, getPlatformFeeStats)
 
+// Get user wallet balance (protected route)
+router.get("/wallet", authenticate, getUserWalletBalance)
 
+// Update user wallet balance (protected route)
 router.post("/wallet/update", authenticate, updateWalletBalance)
- router.post("/wallet/reset", authenticate, resetBalance)
 
+// Reset user wallet balance (protected route)
+router.post("/wallet/reset", authenticate, resetBalance)
 
+// Debug endpoint
+router.get("/debug", debugController)
+router.post("/place-partial", authenticate, placeBetWithPartialPayment)
 
 module.exports = router
