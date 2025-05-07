@@ -8,6 +8,6 @@ router.get("/get", playerController.getPlayers);
 router.put("/:id", playerController.updatePlayer);
 
 router.post('/:id/kill', playerController.addKillToHolder);
-router.post('/reset-holder', playerController.resetCameraHolder);
+router.post('/reset-holder/:id', playerController.resetCameraHolder);
 
 module.exports = router;
