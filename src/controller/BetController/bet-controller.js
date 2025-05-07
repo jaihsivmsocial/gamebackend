@@ -17,36 +17,22 @@ try {
   }
 }
 
-// Function to ensure user has exactly 5000 balance
-const ensureFixedBalance = async (userId) => {
+// Find the ensureFixedBalance function and replace it with this dynamic balance function
+const ensureUserBalance = async (userId) => {
   try {
     const user = await User.findById(userId)
     if (user) {
-      // Always set wallet balance to exactly 5000
-      if (user.walletBalance !== 5000) {
-        user.walletBalance = 5000
-        await user.save()
-
-        // Emit wallet update event
-        if (io) {
-          io.emit("wallet_update", {
-            userId: userId,
-            newBalance: 5000,
-            previousBalance: user.walletBalance,
-            change: 0,
-          })
-        }
-      }
+      // No longer setting a fixed balance - using the actual user balance
       return user
     }
     return null
   } catch (error) {
-    console.error("Error ensuring fixed balance:", error)
+    console.error("Error ensuring user balance:", error)
     return null
   }
 }
 
-// Update the getUserWalletBalance function to always return 5000 with a more consistent response format
+// Replace the getUserWalletBalance function with this dynamic version
 exports.getUserWalletBalance = async (req, res) => {
   try {
     // Check if req.user exists before accessing its properties
@@ -54,7 +40,7 @@ exports.getUserWalletBalance = async (req, res) => {
       console.log("No user found in request. Returning default balance.")
       return res.status(200).json({
         success: true,
-        balance: 5000, // Always return 5000 if not authenticated
+        balance: 0,
         isAuthenticated: false,
       })
     }
@@ -65,27 +51,29 @@ exports.getUserWalletBalance = async (req, res) => {
       console.log("User ID not found in request. Returning default balance.")
       return res.status(200).json({
         success: true,
-        balance: 5000, // Always return 5000 if no user ID
+        balance: 0,
         isAuthenticated: false,
       })
     }
 
-    // Find user and ensure they have exactly 5000 balance
-    const user = await ensureFixedBalance(userId)
+    // Find user with actual balance
+    const user = await User.findById(userId)
 
     if (!user) {
       console.log("User not found in database. Returning default balance.")
       return res.status(200).json({
         success: true,
-        balance: 5000, // Always return 5000 if user not found
+        balance: 0,
         isAuthenticated: false,
       })
     }
 
-    // Always return 5000 as the balance
+    console.log("Returning actual wallet balance:", user.walletBalance || 0)
+
+    // Return actual user balance
     res.status(200).json({
       success: true,
-      balance: 5000, // Always return 5000
+      balance: user.walletBalance || 0,
       isAuthenticated: true,
     })
   } catch (error) {
@@ -93,14 +81,14 @@ exports.getUserWalletBalance = async (req, res) => {
     // Even on error, return a successful response with default balance
     res.status(200).json({
       success: true,
-      balance: 5000,
+      balance: 0,
       isAuthenticated: false,
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
     })
   }
 }
 
-// Update the placeBet function to ensure consistent response format for the frontend
+// Update the placeBet function to properly check wallet balance
 exports.placeBet = async (req, res) => {
   try {
     console.log("=== PLACE BET START ===")
@@ -135,6 +123,32 @@ exports.placeBet = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Stream ID is required",
+      })
+    }
+
+    // Find user with actual balance
+    console.log("Finding user with ID:", userId)
+    const user = await User.findById(userId)
+
+    if (!user) {
+      console.log("User not found with ID:", userId)
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      })
+    }
+    console.log("Found user:", user.username || user.email || userId)
+    console.log("Current wallet balance:", user.walletBalance || 0)
+
+    // Check if user has enough balance
+    if ((user.walletBalance || 0) < amount) {
+      // Return insufficient balance with the exact amount needed
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient balance",
+        insufficientFunds: true,
+        currentBalance: user.walletBalance || 0,
+        amountNeeded: amount - (user.walletBalance || 0),
       })
     }
 
@@ -273,28 +287,6 @@ exports.placeBet = async (req, res) => {
       })
     }
 
-    // Find user and ensure they have exactly 5000 balance
-    console.log("Finding user with ID:", userId)
-    const user = await User.findById(userId)
-
-    if (!user) {
-      console.log("User not found with ID:", userId)
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      })
-    }
-    console.log("Found user:", user.username || user.email || userId)
-
-    // Always allow the bet, regardless of current balance
-    // We'll reset to 5000 after the bet anyway
-    if (amount > 5000) {
-      return res.status(400).json({
-        success: false,
-        message: "Bet amount exceeds maximum allowed (5000)",
-      })
-    }
-
     // Calculate platform fee (5% of bet amount)
     const platformFeePercentage = 0.05
     const platformFee = Math.round(amount * platformFeePercentage)
@@ -320,10 +312,12 @@ exports.placeBet = async (req, res) => {
       processed: false,
     })
 
+    // Store the previous balance for response
+    const previousBalance = user.walletBalance || 0
+
     // Update user's wallet balance
-    console.log("Updating user wallet balance")
-    const previousBalance = user.walletBalance
-    user.walletBalance -= amount // Deduct the full amount including fee
+    console.log("Updating user wallet balance from", previousBalance, "to", previousBalance - amount)
+    user.walletBalance = (previousBalance - amount)
     user.totalBets = (user.totalBets || 0) + 1
     await user.save()
 
@@ -515,27 +509,10 @@ exports.placeBet = async (req, res) => {
       })
     }
 
-    // Reset user balance to 5000 after processing the bet
-    // This ensures they always have 5000 to bet with
-    setTimeout(async () => {
-      try {
-        await ensureFixedBalance(userId)
-
-        // Emit wallet update event with reset balance
-        if (io) {
-          io.emit("wallet_update", {
-            userId: userId,
-            newBalance: 5000,
-            previousBalance: user.walletBalance,
-            change: 5000 - user.walletBalance,
-          })
-        }
-      } catch (resetError) {
-        console.error("Error resetting balance:", resetError)
-      }
-    }, 10000) // Reset after 10 seconds to allow UI to show the change
-
     console.log("Bet placed successfully")
+    console.log("New balance:", user.walletBalance)
+    console.log("Previous balance:", previousBalance)
+
     res.status(201).json({
       success: true,
       bet: {
@@ -585,6 +562,73 @@ exports.placeBet = async (req, res) => {
   }
 }
 
+// Update the resetBalance function to accept a custom amount
+exports.resetBalance = async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      })
+    }
+
+    const userId = req.user.id || req.user._id || req.user.userId
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID not found in request",
+      })
+    }
+
+    // Find the user
+    const user = await User.findById(userId)
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      })
+    }
+
+    // Store previous balance for response
+    const previousBalance = user.walletBalance || 0
+
+    // Get the amount from request body or use 0 as default
+    const resetAmount = req.body.amount !== undefined ? Number(req.body.amount) : 0
+
+    console.log(`Resetting wallet balance for user ${userId} from ${previousBalance} to ${resetAmount}`)
+
+    // Reset the balance to the specified amount or 0
+    user.walletBalance = resetAmount
+    await user.save()
+
+    // Emit wallet update event
+    if (io) {
+      io.emit("wallet_update", {
+        userId: userId,
+        newBalance: resetAmount,
+        previousBalance: previousBalance,
+        change: resetAmount - previousBalance,
+      })
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Wallet balance reset to ${resetAmount}`,
+      newBalance: resetAmount,
+      previousBalance: previousBalance,
+    })
+  } catch (error) {
+    console.error("Reset balance error:", error)
+    res.status(500).json({
+      success: false,
+      message: "Server error while resetting wallet balance",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    })
+  }
+}
+
 // Add a new API endpoint to update wallet balance
 exports.updateWalletBalance = async (req, res) => {
   try {
@@ -624,11 +668,13 @@ exports.updateWalletBalance = async (req, res) => {
     }
 
     // Store previous balance for response
-    const previousBalance = user.walletBalance
+    const previousBalance = user.walletBalance || 0
 
-    // Update the balance
-    user.walletBalance = amount
+    // Update the balance with the provided amount
+    user.walletBalance = Number(amount)
     await user.save()
+
+    console.log(`Updated wallet balance for user ${userId} from ${previousBalance} to ${user.walletBalance}`)
 
     // Emit wallet update event
     if (io) {
@@ -1007,6 +1053,7 @@ const updateBiggestWinThisWeek = async (winAmount) => {
     if (winAmount > (stats.biggestWinThisWeek || 0)) {
       console.log(`New biggest win this week: ${winAmount} (previous: ${stats.biggestWinThisWeek || 0})`)
       stats.biggestWinThisWeek = winAmount
+      console.log(`New biggest win this week: ${winAmount} (previous: ${stats.biggestWinThisWeek || 0})`)
       await stats.save()
 
       // Broadcast the new biggest win to all clients
@@ -1151,6 +1198,7 @@ exports.getBetStats = async (req, res) => {
       })
     }
 
+    console.log("Sending betting stats with biggestWinThisWeek:", stats.biggestWinThisWeek)
     res.status(200).json({
       success: true,
       stats: {
@@ -1214,7 +1262,10 @@ exports.debugController = async (req, res) => {
 exports.loginHook = async (req, res, next) => {
   try {
     if (req.user && req.user.id) {
-      await ensureFixedBalance(req.user.id)
+      const user = await ensureUserBalance(req.user.id)
+      if (!user) {
+        console.error("User not found during login hook")
+      }
     }
     next()
   } catch (error) {
@@ -1273,18 +1324,17 @@ exports.getPlatformFeeStats = async (req, res) => {
     })
   }
 }
-
-// Reset user's wallet balance to 5000
-exports.resetBalance = async (req, res) => {
+exports.placeBetWithPartialPayment = async (req, res) => {
   try {
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      })
-    }
+    console.log("=== PLACE BET WITH PARTIAL PAYMENT START ===")
+    const { questionId, choice, amount, streamId, paymentAmount } = req.body
 
-    const userId = req.user.id || req.user._id || req.user.userId
+    // Add more robust user ID extraction with fallbacks
+    let userId
+    if (req.user) {
+      userId = req.user.id || req.user._id || req.user.userId
+      console.log("Using user ID from token:", userId)
+    }
 
     if (!userId) {
       return res.status(400).json({
@@ -1293,44 +1343,495 @@ exports.resetBalance = async (req, res) => {
       })
     }
 
-    // Find the user
+    console.log("Received bet request:", { questionId, choice, amount, streamId, userId, paymentAmount })
+
+    // Validate bet amount
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid bet amount",
+      })
+    }
+
+    // Validate payment amount
+    if (!paymentAmount || paymentAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment amount",
+      })
+    }
+
+    // Validate streamId
+    if (!streamId) {
+      return res.status(400).json({
+        success: false,
+        message: "Stream ID is required",
+      })
+    }
+
+    // Find user with actual balance
+    console.log("Finding user with ID:", userId)
     const user = await User.findById(userId)
 
     if (!user) {
+      console.log("User not found with ID:", userId)
       return res.status(404).json({
         success: false,
         message: "User not found",
       })
     }
+    console.log("Found user:", user.username || user.email || userId)
+    console.log("Current wallet balance:", user.walletBalance || 0)
 
-    // Store previous balance for response
-    const previousBalance = user.walletBalance
+    // Calculate how much should be deducted from wallet vs. payment
+    const walletBalance = user.walletBalance || 0
+    const totalBetAmount = Number(amount)
 
-    // Reset the balance to 5000
-    user.walletBalance = 5000
-    await user.save()
+    // Calculate how much to take from wallet and how much from payment
+    const walletDeduction = Math.min(walletBalance, totalBetAmount)
+    const paymentNeeded = totalBetAmount - walletDeduction
 
-    // Emit wallet update event
-    if (io) {
-      io.emit("wallet_update", {
-        userId: userId,
-        newBalance: 5000,
-        previousBalance: previousBalance,
-        change: 5000 - previousBalance,
+    console.log(`Wallet balance: ${walletBalance}, Total bet: ${totalBetAmount}`)
+    console.log(`Will deduct ${walletDeduction} from wallet and ${paymentNeeded} from payment`)
+
+    // Verify the payment amount is sufficient
+    if (paymentAmount < paymentNeeded) {
+      console.log(`Insufficient payment amount. Needed: ${paymentNeeded}, Provided: ${paymentAmount}`)
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient payment amount",
+        insufficientFunds: true,
+        currentBalance: walletBalance,
+        amountNeeded: paymentNeeded,
+        paymentProvided: paymentAmount,
       })
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Wallet balance reset to 5000",
-      newBalance: 5000,
-      previousBalance: previousBalance,
+    // Find the question - handle both ObjectId and string ID formats
+    let question = null
+    try {
+      console.log("Looking for question with ID:", questionId, "Type:", typeof questionId)
+
+      // Try to find by ObjectId first if it's a valid ObjectId
+      if (mongoose.Types.ObjectId.isValid(questionId)) {
+        question = await BetQuestion.findById(questionId)
+        console.log("Searched by ObjectId, found:", question ? "Yes" : "No")
+      }
+
+      // If not found, try to find by string ID
+      if (!question) {
+        try {
+          question = await BetQuestion.findOne({ id: questionId })
+          console.log("Searched by string ID:", question ? "Yes" : "No")
+        } catch (err) {
+          console.log("Error searching by string ID:", err.message)
+        }
+      }
+
+      // If still not found, try to find by regex on question text
+      if (!question && questionId.startsWith("question-")) {
+        try {
+          question = await BetQuestion.findOne({
+            question: { $regex: questionId.replace("question-", "") },
+          })
+          console.log("Searched by regex, found:", question ? "Yes" : "No")
+        } catch (err) {
+          console.log("Error searching by regex:", err.message)
+        }
+      }
+
+      // If still not found, get the most recent active question
+      if (!question) {
+        console.log("No question found with ID, getting most recent active question")
+        try {
+          const activeQuestions = await BetQuestion.find({
+            active: true,
+            resolved: false,
+            endTime: { $gt: new Date() },
+          })
+            .sort({ createdAt: -1 })
+            .limit(1)
+
+          if (activeQuestions.length > 0) {
+            question = activeQuestions[0]
+            console.log("Using most recent active question as fallback:", question._id)
+          }
+        } catch (fallbackError) {
+          console.error("Error finding active questions:", fallbackError)
+        }
+      }
+
+      // If still no question found, create a new one
+      if (!question) {
+        console.log("No active questions found, creating a new one")
+        try {
+          const subjects = ["James5423", "Alex98", "NinjaWarrior", "StreamQueen", "ProGamer42"]
+          const conditions = [
+            "survive for 5 minutes",
+            "defeat the boss",
+            "reach the checkpoint",
+            "collect 10 coins",
+            "find the hidden treasure",
+          ]
+
+          const randomSubject = subjects[Math.floor(Math.random() * subjects.length)]
+          const randomCondition = conditions[Math.floor(Math.random() * conditions.length)]
+          const questionText = `Will ${randomSubject} ${randomCondition}?`
+          const endTime = new Date(Date.now() + 30 * 1000) // 36 seconds from now
+
+          question = new BetQuestion({
+            id: `question-${Date.now()}`,
+            question: questionText,
+            subject: randomSubject,
+            condition: randomCondition,
+            startTime: new Date(),
+            endTime,
+            active: true,
+            streamId: streamId || "default-stream",
+            yesBetAmount: 0,
+            noBetAmount: 0,
+            yesPercentage: 50,
+            noPercentage: 50,
+            totalBetAmount: 0,
+            totalPlayers: 0,
+          })
+
+          await question.save()
+          console.log("Created new question on demand:", question._id)
+        } catch (createError) {
+          console.error("Error creating new question:", createError)
+          throw createError // Re-throw to be caught by the outer try/catch
+        }
+      }
+    } catch (error) {
+      console.error("Error finding/creating question:", error)
+      return res.status(404).json({
+        success: false,
+        message: "Bet question not found and could not create a new one",
+        error: error.message,
+      })
+    }
+
+    if (!question) {
+      // Create a debug endpoint to check what questions exist
+      const allQuestions = await BetQuestion.find().sort({ createdAt: -1 }).limit(5)
+      console.error(
+        "No question found. Recent questions:",
+        allQuestions.map((q) => ({ id: q._id, active: q.active, resolved: q.resolved })),
+      )
+
+      return res.status(404).json({
+        success: false,
+        message: "Bet question not found. Please refresh and try again.",
+      })
+    }
+
+    // Check if question is still active
+    if (!question.active || question.resolved) {
+      return res.status(400).json({
+        success: false,
+        message: "This betting round has ended",
+      })
+    }
+
+    // Check if countdown has expired
+    if (new Date() > question.endTime) {
+      return res.status(400).json({
+        success: false,
+        message: "Betting time has expired for this question",
+      })
+    }
+
+    // Calculate platform fee (5% of bet amount)
+    const platformFeePercentage = 0.05
+    const platformFee = Math.round(amount * platformFeePercentage)
+    const betAmountAfterFee = amount - platformFee
+
+    console.log(`Calculating platform fee: ${platformFee} (${platformFeePercentage * 100}% of ${amount})`)
+    console.log(`Bet amount after fee: ${betAmountAfterFee}`)
+
+    // Create the bet with the amount after fee
+    console.log("Creating new bet")
+    const bet = new Bet({
+      user: userId,
+      question: question._id,
+      choice,
+      amount: betAmountAfterFee, // Store the amount after fee
+      originalAmount: amount, // Store the original amount
+      platformFee: platformFee, // Store the platform fee
+      status: "pending",
+      timestamp: new Date(),
+      streamId: streamId,
+      matchedAmount: 0,
+      potentialPayout: 0,
+      processed: false,
     })
+
+    // Store the previous balance for response
+    const previousBalance = user.walletBalance || 0
+
+    // Update user's wallet balance - only deduct the wallet portion
+    console.log("Updating user wallet balance from", previousBalance, "to", previousBalance - walletDeduction)
+    user.walletBalance = previousBalance - walletDeduction
+    user.totalBets = (user.totalBets || 0) + 1
+    await user.save()
+
+    // Create transaction record for the bet
+    console.log("Creating bet transaction record")
+    const betTransaction = new Transaction({
+      user: userId,
+      type: "bet_place",
+      amount: -betAmountAfterFee, // Record the bet amount after fee
+      bet: bet._id,
+      question: question._id,
+      balanceAfter: user.walletBalance + platformFee, // Temporary balance after just the bet
+    })
+    await betTransaction.save()
+
+    // Create transaction record for the platform fee
+    console.log("Creating platform fee transaction record")
+    const feeTransaction = new Transaction({
+      user: userId,
+      type: "platform_fee",
+      amount: -platformFee, // Record the platform fee as a separate transaction
+      bet: bet._id,
+      question: question._id,
+      balanceAfter: user.walletBalance, // Final balance after both bet and fee
+    })
+    await feeTransaction.save()
+
+    // Create transaction record for the payment portion
+    if (paymentNeeded > 0) {
+      console.log("Creating payment transaction record")
+      const paymentTransaction = new Transaction({
+        user: userId,
+        type: "payment_for_bet",
+        amount: paymentNeeded,
+        bet: bet._id,
+        question: question._id,
+        balanceAfter: user.walletBalance,
+      })
+      await paymentTransaction.save()
+    }
+
+    // Update question stats with the bet amount after fee
+    console.log("Updating question stats")
+    if (choice === "Yes") {
+      question.yesBetAmount = (question.yesBetAmount || 0) + betAmountAfterFee
+      // Check if this user has already bet on this question with this choice
+      const existingYesBet = await Bet.findOne({
+        user: userId,
+        question: question._id,
+        choice: "Yes",
+        _id: { $ne: bet._id }, // Exclude the current bet
+      })
+
+      if (!existingYesBet) {
+        // Only increment if this is the first bet from this user for this choice
+        question.yesUserCount = (question.yesUserCount || 0) + 1
+      }
+    } else {
+      question.noBetAmount = (question.noBetAmount || 0) + betAmountAfterFee
+      // Check if this user has already bet on this question with this choice
+      const existingNoBet = await Bet.findOne({
+        user: userId,
+        question: question._id,
+        choice: "No",
+        _id: { $ne: bet._id }, // Exclude the current bet
+      })
+
+      if (!existingNoBet) {
+        // Only increment if this is the first bet from this user for this choice
+        question.noUserCount = (question.noUserCount || 0) + 1
+      }
+    }
+
+    question.totalBetAmount = (question.totalBetAmount || 0) + betAmountAfterFee
+
+    // Check if this user has already bet on this question (regardless of choice)
+    const existingBet = await Bet.findOne({
+      user: userId,
+      question: question._id,
+      _id: { $ne: bet._id }, // Exclude the current bet
+    })
+
+    if (!existingBet) {
+      // Only increment if this is the first bet from this user on this question
+      question.totalPlayers = (question.totalPlayers || 0) + 1
+    }
+
+    question.totalPlatformFees = (question.totalPlatformFees || 0) + platformFee
+
+    // Recalculate percentages based on user counts instead of bet amounts
+    const totalUsers = (question.yesUserCount || 0) + (question.noUserCount || 0)
+    if (totalUsers > 0) {
+      question.yesPercentage = Math.round(((question.yesUserCount || 0) / totalUsers) * 100)
+      question.noPercentage = Math.round(((question.noUserCount || 0) / totalUsers) * 100)
+
+      // Ensure percentages add up to 100%
+      if (question.yesPercentage + question.noPercentage !== 100) {
+        // Adjust the larger percentage to make the sum 100
+        if (question.yesPercentage > question.noPercentage) {
+          question.yesPercentage = 100 - question.noPercentage
+        } else {
+          question.noPercentage = 100 - question.yesPercentage
+        }
+      }
+    } else {
+      // Default to 50/50 if no users have bet yet
+      question.yesPercentage = 50
+      question.noPercentage = 50
+    }
+
+    await question.save()
+
+    // Calculate potential payout based on current odds
+    console.log("Calculating potential payout")
+    const odds =
+      choice === "Yes" ? question.noPercentage / question.yesPercentage : question.yesPercentage / question.noPercentage
+
+    // Calculate potential winnings with 5% platform fee
+    // Formula: payout = bet * 2 * 0.95
+    const platformFeePercentageOnWinnings = 0.05
+    const grossPotentialWinnings = betAmountAfterFee * odds
+    const platformFeeOnWinnings = (betAmountAfterFee + grossPotentialWinnings) * platformFeePercentageOnWinnings
+    const potentialPayout = betAmountAfterFee + grossPotentialWinnings - platformFeeOnWinnings
+
+    console.log(`Potential payout calculation:`)
+    console.log(`- Bet amount after initial fee: ${betAmountAfterFee}`)
+    console.log(`- Odds: ${odds}`)
+    console.log(`- Gross potential winnings: ${grossPotentialWinnings}`)
+    console.log(`- Platform fee (${platformFeePercentageOnWinnings * 100}%): ${platformFeeOnWinnings}`)
+    console.log(`- Net potential payout: ${potentialPayout}`)
+
+    bet.potentialPayout = potentialPayout
+    bet.grossPotentialPayout = betAmountAfterFee + grossPotentialWinnings
+    bet.platformFeeOnWinnings = platformFeeOnWinnings
+    await bet.save()
+
+    // Try to match the bet
+    console.log("Matching bet")
+    try {
+      await matchBet(bet, question)
+    } catch (matchError) {
+      console.error("Error matching bet:", matchError)
+      // Continue even if matching fails
+    }
+
+    // Update global stats
+    console.log("Updating global stats")
+    try {
+      await updateBetStats(betAmountAfterFee, platformFee)
+    } catch (statsError) {
+      console.error("Error updating stats:", statsError)
+      // Continue even if stats update fails
+    }
+
+    // Emit socket events for real-time updates
+    console.log("Emitting socket events")
+    if (io) {
+      // Emit bet placed event with updated question data
+      io.emit("betPlaced", {
+        questionId: question._id,
+        yesPercentage: question.yesPercentage,
+        noPercentage: question.noPercentage,
+        totalBetAmount: question.totalBetAmount,
+        totalPlayers: question.totalPlayers,
+        newPlayer: true, // Indicate this is a new player
+      })
+
+      // Also emit specific stats updates
+      io.emit("total_bets_update", {
+        amount: question.totalBetAmount,
+      })
+
+      io.emit("player_count_update", {
+        count: question.totalPlayers,
+      })
+
+      // Emit comprehensive betting stats
+      io.emit("betting_stats", {
+        totalBetsAmount: question.totalBetAmount,
+        biggestWinThisWeek: user.biggestWin || 0,
+        totalPlayers: question.totalPlayers,
+        activePlayers: question.totalPlayers, // Simplification
+        totalPlatformFees: question.totalPlatformFees || 0,
+      })
+
+      // IMPORTANT: Emit wallet update event with real-time balance
+      io.emit("wallet_update", {
+        userId: userId,
+        newBalance: user.walletBalance,
+        previousBalance: previousBalance,
+        change: -walletDeduction, // Only report the wallet deduction as the change
+        platformFee: platformFee,
+        paymentAmount: paymentNeeded, // Include the payment amount
+      })
+
+      // Add a specific bet_response event for immediate UI updates
+      io.emit("bet_response", {
+        success: true,
+        newBalance: user.walletBalance,
+        previousBalance: previousBalance,
+        change: -walletDeduction, // Only report the wallet deduction as the change
+        platformFee: platformFee,
+        userId: userId,
+        paymentAmount: paymentNeeded, // Include the payment amount
+      })
+    }
+
+    console.log("Bet placed successfully")
+    console.log("New balance:", user.walletBalance)
+    console.log("Previous balance:", previousBalance)
+    console.log("Wallet deduction:", walletDeduction)
+    console.log("Payment amount:", paymentNeeded)
+
+    res.status(201).json({
+      success: true,
+      bet: {
+        ...bet.toObject(),
+        potentialPayout: potentialPayout,
+        originalAmount: amount,
+        platformFee: platformFee,
+      },
+      newBalance: user.walletBalance,
+      previousBalance: previousBalance,
+      walletDeduction: walletDeduction,
+      paymentAmount: paymentNeeded,
+      platformFee: platformFee,
+      questionStats: {
+        yesPercentage: question.yesPercentage,
+        noPercentage: question.noPercentage,
+        totalBetAmount: question.totalBetAmount,
+        totalPlayers: question.totalPlayers,
+      },
+    })
+    console.log("=== PLACE BET WITH PARTIAL PAYMENT END ===")
   } catch (error) {
-    console.error("Reset balance error:", error)
+    console.error("Place bet error:", error)
+    console.error("Error stack:", error.stack)
+
+    // Check for specific error types
+    if (error.name === "CastError") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ID format",
+        error: error.message,
+      })
+    }
+
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        error: error.message,
+      })
+    }
+
+    // Generic error response
     res.status(500).json({
       success: false,
-      message: "Server error while resetting wallet balance",
+      message: "Server error while placing bet",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
     })
   }

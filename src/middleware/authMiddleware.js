@@ -88,7 +88,7 @@ const authenticate = async (req, res, next) => {
     // Add debugging for token verification
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET || "fallback_secret_for_development")
-      console.log("Token verified successfully for user ID:", decoded.id)
+      // console.log("Token verified successfully for user ID:", decoded.id)
 
       const user = await User.findById(decoded.id).select("-password")
 
@@ -105,7 +105,6 @@ const authenticate = async (req, res, next) => {
 
       next()
     } catch (jwtError) {
-      console.error("JWT verification error:", jwtError.message)
       return res.status(401).json({ message: "Invalid or expired token" })
     }
   } catch (error) {

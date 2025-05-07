@@ -6,7 +6,24 @@ const playerSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+    },
+    CameraHoldStartTime: {
+      type: Date,
+      default: null
+    },
+    Kills: {
+      type: Number,
+      default: 0
+    },
+    LastHoldDuration: {
+      type: Number, 
+      default: 0
+    },
+    TotalHoldTime: {
+      type: Number, 
+      default: 0
     }
+  
   },
   {
     timestamps: true 
