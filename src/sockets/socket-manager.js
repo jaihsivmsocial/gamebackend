@@ -36,7 +36,7 @@ function isValidObjectId(id) {
 const generateRandomQuestion = async () => {
   try {
     // Fetch the camera holder data from the API
-    const response = await fetch("http://apitest.tribez.gg/api/players/get")
+    const response = await fetch("http://localhost:5000/api/players/get")
     if (!response.ok) {
       throw new Error(`Failed to fetch camera holder: ${response.status}`)
     }
@@ -82,7 +82,7 @@ const generateRandomQuestion = async () => {
 async function shouldGenerateQuestions() {
   try {
     // Fetch the camera holder data from the API
-    const response = await fetch("http://apitest.tribez.gg/api/players/get")
+    const response = await fetch("http://localhost:5000/api/players/get")
     if (!response.ok) {
       console.error("Failed to fetch camera holder data:", response.status)
       return false
@@ -108,66 +108,64 @@ async function shouldGenerateQuestions() {
 }
 
 // Add this function to check for camera holder changes
-// async function checkCameraHolderChanges() {
-//   try {
-//     // Fetch the camera holder data from the API
-//     const response = await fetch("http://localhost:5000/api/players/get")
-//     if (!response.ok) {
-//       console.error("Failed to fetch camera holder data:", response.status)
-//       return
-//     }
+async function checkCameraHolderChanges() {
+  try {
+    // Fetch the camera holder data from the API
+    const response = await fetch("http://localhost:5000/api/players/get")
+    if (!response.ok) {
+      console.error("Failed to fetch camera holder data:", response.status)
+      return
+    }
 
-//     const data = await response.json()
+    const data = await response.json()
 
-//     // Check if we have valid data
-//     if (!Array.isArray(data) || data.length === 0) {
-//       console.log("No camera holder data found")
-//       return
-//     }
+    // Check if we have valid data
+    if (!Array.isArray(data) || data.length === 0) {
+      console.log("No camera holder data found")
+      return
+    }
 
-//     const currentCameraHolder = data[0].CameraHolderName
-//     console.log("Current camera holder name:", currentCameraHolder, "Last camera holder name:", lastCameraHolderName)
+    const currentCameraHolder = data[0].CameraHolderName
+    console.log("Current camera holder name:", currentCameraHolder, "Last camera holder name:", lastCameraHolderName)
 
-//     // If camera holder changed from None/empty to a valid name, generate a question immediately
-//     if (
-//       (lastCameraHolderName === null || lastCameraHolderName === "" || lastCameraHolderName === "None") &&
-//       currentCameraHolder &&
-//       currentCameraHolder !== "None"
-//     ) {
-//       console.log("Camera holder changed to a valid name, generating question immediately")
+    // If camera holder changed from None/empty to a valid name, generate a question immediately
+    if (
+      (lastCameraHolderName === null || lastCameraHolderName === "" || lastCameraHolderName === "None") &&
+      currentCameraHolder &&
+      currentCameraHolder !== "None"
+    ) {
+      console.log("Camera holder changed to a valid name, generating question immediately")
 
-//       // Check if there's already an active question
-//       const activeQuestion = await BetQuestion.findOne({
-//         active: true,
-//         resolved: false,
-//         endTime: { $gt: new Date() },
-//       })
+      // Check if there's already an active question
+      const activeQuestion = await BetQuestion.findOne({
+        active: true,
+        resolved: false,
+        endTime: { $gt: new Date() },
+      })
 
-//       // Only generate a new question if there's no active one
-//       if (!activeQuestion) {
-//         // Get all active streams
-//         const activeStreams = await Stream.find({ status: "active" }).distinct("streamId")
+      // Only generate a new question if there's no active one
+      if (!activeQuestion) {
+        // Get all active streams
+        const activeStreams = await Stream.find({ status: "active" }).distinct("streamId")
 
-//         // If no active streams, use default
-//         if (!activeStreams || activeStreams.length === 0) {
-//           await generateNewQuestion("default-stream")
-//         } else {
-//           // Generate a question for each active stream
-//           for (const streamId of activeStreams) {
-//             await generateNewQuestion(streamId)
-//           }
-//         }
-//       }
-//     }
+        // If no active streams, use default
+        if (!activeStreams || activeStreams.length === 0) {
+          await generateNewQuestion("default-stream")
+        } else {
+          // Generate a question for each active stream
+          for (const streamId of activeStreams) {
+            await generateNewQuestion(streamId)
+          }
+        }
+      }
+    }
 
-//     // Update the last camera holder name
-//     lastCameraHolderName = currentCameraHolder
-//   } catch (error) {
-//     console.error("Error checking camera holder changes:", error)
-//   }
-// }
-
-
+    // Update the last camera holder name
+    lastCameraHolderName = currentCameraHolder
+  } catch (error) {
+    console.error("Error checking camera holder changes:", error)
+  }
+}
 
 // Global io instance
 let io
