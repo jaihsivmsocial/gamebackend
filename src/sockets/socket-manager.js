@@ -36,7 +36,7 @@ function isValidObjectId(id) {
 const generateRandomQuestion = async () => {
   try {
     // Fetch the camera holder data from the API
-    const response = await fetch("http://localhost:5000/api/players/get")
+    const response = await fetch("http://apitest.tribez.gg/api/players/get")
     if (!response.ok) {
       throw new Error(`Failed to fetch camera holder: ${response.status}`)
     }
@@ -82,7 +82,7 @@ const generateRandomQuestion = async () => {
 async function shouldGenerateQuestions() {
   try {
     // Fetch the camera holder data from the API
-    const response = await fetch("http://localhost:5000/api/players/get")
+    const response = await fetch("http://apitest.tribez.gg/api/players/get")
     if (!response.ok) {
       console.error("Failed to fetch camera holder data:", response.status)
       return false
@@ -170,7 +170,7 @@ async function shouldGenerateQuestions() {
 async function checkCameraHolderChanges() {
   try {
     // Fetch the camera holder data from the API
-    const response = await fetch("http://localhost:5000/api/players/get");
+    const response = await fetch("http://apitest.tribez.gg/api/players/get");
     if (!response.ok) {
       console.error("Failed to fetch camera holder data:", response.status);
       return;
@@ -198,7 +198,7 @@ async function checkCameraHolderChanges() {
       // Update the CameraHoldStartTime via API if not already set
       if (!data[0].CameraHoldStartTime) {
         try {
-          await fetch(`http://localhost:5000/api/players/${data[0]._id}`, {
+          await fetch(`http://apitest.tribez.gg/api/players/${data[0]._id}`, {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
@@ -246,7 +246,7 @@ async function checkCameraHolderChanges() {
       
       // Update the player to stop the timer and finalize stats
       try {
-        await fetch(`http://localhost:5000/api/players/${data[0]._id}`, {
+        await fetch(`http://apitest.tribez.gg/api/players/${data[0]._id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
