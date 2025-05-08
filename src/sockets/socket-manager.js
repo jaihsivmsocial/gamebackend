@@ -36,7 +36,7 @@ function isValidObjectId(id) {
 const generateRandomQuestion = async () => {
   try {
     // Fetch the camera holder data from the API
-    const response = await fetch("http://localhost:5000/api/players/get")
+    const response = await fetch("http://apitest.tribez.gg/api/players/get")
     if (!response.ok) {
       throw new Error(`Failed to fetch camera holder: ${response.status}`)
     }
@@ -82,7 +82,7 @@ const generateRandomQuestion = async () => {
 async function shouldGenerateQuestions() {
   try {
     // Fetch the camera holder data from the API
-    const response = await fetch("http://localhost:5000/api/players/get")
+    const response = await fetch("http://apitest.tribez.gg/api/players/get")
     if (!response.ok) {
       console.error("Failed to fetch camera holder data:", response.status)
       return false
@@ -111,7 +111,7 @@ async function shouldGenerateQuestions() {
 async function checkCameraHolderChanges() {
   try {
     // Fetch the camera holder data from the API
-    const response = await fetch("http://localhost:5000/api/players/get")
+    const response = await fetch("http://apitest.tribez.gg/api/players/get")
     if (!response.ok) {
       console.error("Failed to fetch camera holder data:", response.status)
       return
