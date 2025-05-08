@@ -1257,7 +1257,6 @@ exports.debugController = async (req, res) => {
     })
   }
 }
-
 // Login hook to ensure user has 5000 balance
 exports.loginHook = async (req, res, next) => {
   try {
