@@ -1412,7 +1412,11 @@ function isValidObjectId(id) {
 const generateRandomQuestion = async () => {
   try {
     // Use the current camera holder data instead of fetching it again
-    if (!currentCameraHolder || !currentCameraHolder.CameraHolderName || currentCameraHolder.CameraHolderName === "None") {
+    if (
+      !currentCameraHolder ||
+      !currentCameraHolder.CameraHolderName ||
+      currentCameraHolder.CameraHolderName === "None"
+    ) {
       throw new Error("No valid camera holder data found")
     }
 
@@ -1465,6 +1469,140 @@ async function shouldGenerateQuestions() {
   }
 }
 
+// Global io instance
+let io
+
+// IMPORTANT: Move the generateNewQuestion function definition here, before it's used
+// Update the generateNewQuestion function to handle the async generateRandomQuestion
+async function generateNewQuestion(specificStreamId = null) {
+  try {
+    // Check if questions should be generated
+    const shouldGenerate = await shouldGenerateQuestions()
+    if (!shouldGenerate) {
+      console.log("Skipping question generation - camera holder conditions not met")
+      return null
+    }
+
+    // Get the dynamic question with camera holder name as subject
+    const { subject, condition } = await generateRandomQuestion()
+    const questionText = `Will ${subject} ${condition}?`
+    const now = new Date()
+    const endTime = new Date(now.getTime() + 36000) // 36 seconds countdown
+
+    // Use provided streamId or default
+    const streamId = specificStreamId || "default-stream"
+
+    // Create a new question in the database
+    const newQuestion = new BetQuestion({
+      question: questionText,
+      subject,
+      condition,
+      startTime: now,
+      endTime,
+      active: true,
+      yesPercentage: 50,
+      noPercentage: 50,
+      totalBetAmount: 0,
+      totalPlayers: 0,
+      hasBets: false,
+      streamId: streamId, // Add the streamId
+    })
+
+    await newQuestion.save()
+
+    // Emit socket event for new question
+    io.emit("new_question", {
+      id: newQuestion._id,
+      question: questionText,
+      subject,
+      condition,
+      startTime: now,
+      endTime,
+      yesPercentage: 50,
+      noPercentage: 50,
+      totalBetAmount: 0,
+      totalPlayers: 0,
+    })
+
+    console.log("New betting question generated:", questionText)
+
+    // Schedule question resolution after 36 seconds
+    const timerId = setTimeout(() => resolveQuestion(newQuestion._id), 36000)
+
+    // Store the timer ID
+    questionTimers.set(newQuestion._id.toString(), timerId)
+
+    return newQuestion
+  } catch (error) {
+    console.error("Error generating new question:", error)
+    return null
+  }
+}
+
+// Automatically resolve a question
+async function resolveQuestion(questionId) {
+  try {
+    // Find the question in the database
+    const question = await BetQuestion.findById(questionId)
+
+    if (!question || question.resolved) {
+      console.log(`Question ${questionId} already resolved or not found`)
+      return
+    }
+
+    // Check if any bets were placed on this question
+    const bets = await Bet.find({ questionId })
+
+    if (!bets || bets.length === 0) {
+      console.log(`No bets placed on question ${questionId}, skipping resolution`)
+
+      // Mark the question as inactive and resolved without an outcome
+      question.resolved = true
+      question.active = false
+      question.outcome = null // Set outcome to null to indicate it was skipped
+      await question.save()
+
+      // Clear any timer for this question
+      if (questionTimers.has(questionId.toString())) {
+        clearTimeout(questionTimers.get(questionId.toString()))
+        questionTimers.delete(questionId.toString())
+      }
+
+      // Emit socket event for question skipped
+      io.emit("question_skipped", {
+        questionId,
+      })
+
+      return
+    }
+
+    // Randomly determine outcome (50/50 chance)
+    const outcome = Math.random() < 0.5 ? "Yes" : "No"
+
+    // Emit socket event for question resolution
+    io.emit("question_resolved", {
+      questionId,
+      outcome,
+    })
+
+    console.log(`Question resolved: ${questionId} - Outcome: ${outcome}`)
+
+    // Mark the question as resolved
+    question.resolved = true
+    question.active = false
+    question.outcome = outcome
+    await question.save()
+
+    // Clear any timer for this question
+    if (questionTimers.has(questionId.toString())) {
+      clearTimeout(questionTimers.get(questionId.toString()))
+      questionTimers.delete(questionId.toString())
+    }
+  } catch (error) {
+    console.error("Error resolving question:", error)
+  }
+}
+
 // Add this function to check for camera holder changes
 async function checkCameraHolderChanges() {
   try {
@@ -1486,7 +1624,12 @@ async function checkCameraHolderChanges() {
     // Store the current camera holder data
     currentCameraHolder = data[0]
     const currentCameraHolderName = data[0].CameraHolderName
-    console.log("Current camera holder name:", currentCameraHolderName, "Last camera holder name:", lastCameraHolderName)
+    console.log(
+      "Current camera holder name:",
+      currentCameraHolderName,
+      "Last camera holder name:",
+      lastCameraHolderName,
+    )
 
     // If camera holder changed from None/empty to a valid name, generate a question immediately
     if (
@@ -1537,11 +1680,8 @@ async function checkCameraHolderChanges() {
 
 // Add a function to get the current camera holder
 function getCurrentCameraHolder() {
-  return currentCameraHolder;
+  return currentCameraHolder
 }
-
-// Global io instance
-let io
 
 module.exports = async function setupSocketIO(server) {
   // Create Socket.IO server with Redis adapter for horizontal scaling
@@ -1551,7 +1691,7 @@ module.exports = async function setupSocketIO(server) {
       methods: ["GET", "POST"],
       credentials: true,
     },
-    adapter: createAdapter(redisPubClient, redisSubClient), 
+    adapter: createAdapter(redisPubClient, redisSubClient),
     transports: ["websocket", "polling"],
     pingTimeout: 60000,
     pingInterval: 25000,
@@ -2052,7 +2192,7 @@ module.exports = async function setupSocketIO(server) {
         question.yesPercentage = yesPercentage
         question.noPercentage = noPercentage
         question.totalBetAmount = (question.totalBetAmount || 0) + amount
-        question.totalPlayers = existingBets.length + 1 
+        question.totalPlayers = existingBets.length + 1
 
         // Set a flag to indicate a bet was placed on this question
         question.hasBets = true
@@ -2588,136 +2728,6 @@ module.exports = async function setupSocketIO(server) {
         }
       }
     })
-  }
-
-  // Automatically resolve a question
-  async function resolveQuestion(questionId) {
-    try {
-      // Find the question in the database
-      const question = await BetQuestion.findById(questionId)
-
-      if (!question || question.resolved) {
-        console.log(`Question ${questionId} already resolved or not found`)
-        return
-      }
-
-      // Check if any bets were placed on this question
-      const bets = await Bet.find({ questionId })
-
-      if (!bets || bets.length === 0) {
-        console.log(`No bets placed on question ${questionId}, skipping resolution`)
-
-        // Mark the question as inactive and resolved without an outcome
-        question.resolved = true
-        question.active = false
-        question.outcome = null // Set outcome to null to indicate it was skipped
-        await question.save()
-
-        // Clear any timer for this question
-        if (questionTimers.has(questionId.toString())) {
-          clearTimeout(questionTimers.get(questionId.toString()))
-          questionTimers.delete(questionId.toString())
-        }
-
-        // Emit socket event for question skipped
-        io.emit("question_skipped", {
-          questionId,
-        })
-
-        return
-      }
-
-      // Randomly determine outcome (50/50 chance)
-      const outcome = Math.random() < 0.5 ? "Yes" : "No"
-
-      // Emit socket event for question resolution
-      io.emit("question_resolved", {
-        questionId,
-        outcome,
-      })
-
-      console.log(`Question resolved: ${questionId} - Outcome: ${outcome}`)
-
-      // Mark the question as resolved
-      question.resolved = true
-      question.active = false
-      question.outcome = outcome
-      await question.save()
-
-      // Clear any timer for this question
-      if (questionTimers.has(questionId.toString())) {
-        clearTimeout(questionTimers.get(questionId.toString()))
-        questionTimers.delete(questionId.toString())
-      }
-    } catch (error) {
-      console.error("Error resolving question:", error)
-    }
-  }
-
-  // Update the generateNewQuestion function to handle the async generateRandomQuestion
-  async function generateNewQuestion(specificStreamId = null) {
-    try {
-      // Check if questions should be generated
-      const shouldGenerate = await shouldGenerateQuestions()
-      if (!shouldGenerate) {
-        console.log("Skipping question generation - camera holder conditions not met")
-        return null
-      }
-
-      // Get the dynamic question with camera holder name as subject
-      const { subject, condition } = await generateRandomQuestion()
-      const questionText = `Will ${subject} ${condition}?`
-      const now = new Date()
-      const endTime = new Date(now.getTime() + 36000) // 36 seconds countdown
-
-      // Use provided streamId or default
-      const streamId = specificStreamId || "default-stream"
-
-      // Create a new question in the database
-      const newQuestion = new BetQuestion({
-        question: questionText,
-        subject,
-        condition,
-        startTime: now,
-        endTime,
-        active: true,
-        yesPercentage: 50,
-        noPercentage: 50,
-        totalBetAmount: 0,
-        totalPlayers: 0,
-        hasBets: false,
-        streamId: streamId, // Add the streamId
-      })
-
-      await newQuestion.save()
-
-      // Emit socket event for new question
-      io.emit("new_question", {
-        id: newQuestion._id,
-        question: questionText,
-        subject,
-        condition,
-        startTime: now,
-        endTime,
-        yesPercentage: 50,
-        noPercentage: 50,
-        totalBetAmount: 0,
-        totalPlayers: 0,
-      })
-
-      console.log("New betting question generated:", questionText)
-
-      // Schedule question resolution after 36 seconds
-      const timerId = setTimeout(() => resolveQuestion(newQuestion._id), 36000)
-
-      // Store the timer ID
-      questionTimers.set(newQuestion._id.toString(), timerId)
-
-      return newQuestion
-    } catch (error) {
-      console.error("Error generating new question:", error)
-      return null
-    }
   }
 
   // Create API endpoint for synchronous decrements (for beforeunload events)
