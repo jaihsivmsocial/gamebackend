@@ -790,7 +790,7 @@ exports.confirmPayment = async (req, res) => {
 
         // Now confirm the payment intent with return_url
         const confirmedIntent = await stripe.paymentIntents.confirm(paymentIntentId, {
-          return_url: `${process.env.FRONTEND_URL || "http://localhost:3000"}/payment/complete`,
+          return_url: `${process.env.FRONTEND_URL || "http://apitest.tribez.gg"}/payment/complete`,
         })
 
         // Update payment status based on confirmation result
@@ -889,7 +889,7 @@ exports.confirmPayment = async (req, res) => {
       // Confirm the payment intent
       try {
         const confirmedIntent = await stripe.paymentIntents.confirm(paymentIntentId, {
-          return_url: `${process.env.FRONTEND_URL || "http://localhost:3000"}/payment/complete`,
+          return_url: `${process.env.FRONTEND_URL || "http://apitest.tribez.gg"}/payment/complete`,
         })
 
         // Update payment status based on confirmation result

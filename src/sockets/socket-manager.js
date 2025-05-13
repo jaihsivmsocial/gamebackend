@@ -1687,7 +1687,7 @@ module.exports = async function setupSocketIO(server) {
   // Create Socket.IO server with Redis adapter for horizontal scaling
   io = new Server(server, {
     cors: {
-      origin: process.env.FRONTEND_URL || "http://localhost:3000",
+      origin: process.env.FRONTEND_URL || "http://apitest.tribez.gg",
       methods: ["GET", "POST"],
       credentials: true,
     },
