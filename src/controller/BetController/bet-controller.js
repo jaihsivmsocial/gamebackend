@@ -2057,7 +2057,16 @@ exports.placeBet = async (req, res) => {
         try {
           // Get the current camera holder from the socket manager
           const cameraHolder = socketManager.getCurrentCameraHolder()
-          const subject = cameraHolder?.CameraHolderName || "Player"
+          
+          // Only create a question if there's a valid camera holder
+          if (!cameraHolder || !cameraHolder.CameraHolderName || cameraHolder.CameraHolderName === "None") {
+            return res.status(400).json({
+              success: false,
+              message: "No active camera holder available for betting",
+            })
+          }
+          
+          const subject = cameraHolder.CameraHolderName || "Player"
           
           const conditions = [
             "survive for 5 minutes",
@@ -2069,7 +2078,7 @@ exports.placeBet = async (req, res) => {
 
           const randomCondition = conditions[Math.floor(Math.random() * conditions.length)]
           const questionText = `Will ${subject} ${randomCondition}?`
-          const endTime = new Date(Date.now() + 30 * 1000) // 36 seconds from now
+          const endTime = new Date(Date.now() + 36 * 1000) // 36 seconds from now (changed from 30)
 
           question = new BetQuestion({
             id: `question-${Date.now()}`,
@@ -2943,6 +2952,17 @@ exports.getUserBets = async (req, res) => {
 // Get active bet question
 exports.getActiveBetQuestion = async (req, res) => {
   try {
+    // Get the current camera holder from the socket manager
+    const cameraHolder = socketManager.getCurrentCameraHolder()
+    
+    // Only return a question if there's a valid camera holder
+    if (!cameraHolder || !cameraHolder.CameraHolderName || cameraHolder.CameraHolderName === "None") {
+      return res.status(404).json({
+        success: false,
+        message: "No active camera holder available for betting",
+      })
+    }
+    
     const activeQuestion = await BetQuestion.findOne({
       active: true,
       resolved: false,
@@ -2950,20 +2970,61 @@ exports.getActiveBetQuestion = async (req, res) => {
     })
 
     if (!activeQuestion) {
-      return res.status(404).json({
-        success: false,
-        message: "No active bet questions found",
+      // If no active question is found but we have a camera holder, create a new one
+      const subject = cameraHolder.CameraHolderName
+      const conditions = [
+        "survive for 5 minutes",
+        "defeat the boss",
+        "reach the checkpoint",
+        "collect 10 coins",
+        "find the hidden treasure",
+      ]
+
+      const randomCondition = conditions[Math.floor(Math.random() * conditions.length)]
+      const questionText = `Will ${subject} ${randomCondition}?`
+      const endTime = new Date(Date.now() + 36 * 1000) // 36 seconds from now (changed from 30)
+
+      const newQuestion = new BetQuestion({
+        id: `question-${Date.now()}`,
+        question: questionText,
+        subject: subject,
+        condition: randomCondition,
+        startTime: new Date(),
+        endTime,
+        active: true,
+        streamId: req.query.streamId || "default-stream",
+        yesBetAmount: 0,
+        noBetAmount: 0,
+        yesPercentage: 50,
+        noPercentage: 50,
+        totalBetAmount: 0,
+        totalPlayers: 0,
+      })
+
+      await newQuestion.save()
+      
+      // Emit the new question to all clients
+      if (io) {
+        io.emit("new_question", {
+          ...newQuestion.toObject(),
+          subject: subject
+        })
+      }
+      
+      // Return the new question
+      return res.status(200).json({
+        success: true,
+        question: {
+          ...newQuestion.toObject(),
+          subject: subject
+        }
       })
     }
-
-    // Get the current camera holder from the socket manager
-    const cameraHolder = socketManager.getCurrentCameraHolder()
-    const subject = cameraHolder?.CameraHolderName || activeQuestion.subject || "Player"
 
     // Update the response to include the current camera holder
     const questionResponse = {
       ...activeQuestion.toObject(),
-      subject: subject
+      subject: cameraHolder.CameraHolderName
     }
 
     res.status(200).json({
@@ -3182,6 +3243,139 @@ exports.getPlatformFeeStats = async (req, res) => {
     })
   }
 }
+
+// Add a new function to handle camera holder changes
+exports.handleCameraHolderChange = async (req, res) => {
+  try {
+    const { previousHolder, newHolder } = req.body
+    
+    console.log(`Camera holder changed from ${previousHolder} to ${newHolder}`)
+    
+    // If the camera holder changed to None or empty, resolve all active questions with "No" outcome
+    if (!newHolder || newHolder === "None") {
+      // Find all active questions
+      const activeQuestions = await BetQuestion.find({
+        active: true,
+        resolved: false,
+      })
+      
+      // Resolve each question
+      for (const question of activeQuestions) {
+        question.resolved = true
+        question.outcome = "No" // Player died or left, so outcome is No
+        question.active = false
+        question.resolvedReason = "Camera holder died or changed"
+        await question.save()
+        
+        // Process all bets for this question
+        await processBetsForQuestion(question._id, "No")
+        
+        // Emit socket event for question resolution
+        if (io) {
+          io.emit("questionResolved", {
+            questionId: question._id,
+            outcome: "No",
+            reason: "Camera holder died or changed",
+          })
+        }
+      }
+    }
+    
+    // Update the camera holder in the socket manager if available
+    if (socketManager && typeof socketManager.updateCameraHolder === 'function') {
+      socketManager.updateCameraHolder({
+        CameraHolderName: newHolder || "None"
+      })
+    }
+    
+    res.status(200).json({
+      success: true,
+      message: "Camera holder change processed successfully",
+      previousHolder,
+      newHolder,
+    })
+  } catch (error) {
+    console.error("Handle camera holder change error:", error)
+    res.status(500).json({
+      success: false,
+      message: "Server error while handling camera holder change",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    })
+  }
+}
+
+// Create a new bet question with 36-second timer
+exports.createBetQuestion = async (req, res) => {
+  try {
+    const { streamId } = req.body || { streamId: "default-stream" }
+    
+    // Get the current camera holder
+    const cameraHolder = socketManager.getCurrentCameraHolder()
+    
+    // Only create a question if there's a valid camera holder
+    if (!cameraHolder || !cameraHolder.CameraHolderName || cameraHolder.CameraHolderName === "None") {
+      return res.status(400).json({
+        success: false,
+        message: "No active camera holder available for betting",
+      })
+    }
+    
+    const subject = cameraHolder.CameraHolderName
+    const conditions = [
+      "survive for 5 minutes",
+      "defeat the boss",
+      "reach the checkpoint",
+      "collect 10 coins",
+      "find the hidden treasure",
+    ]
+
+    const randomCondition = conditions[Math.floor(Math.random() * conditions.length)]
+    const questionText = `Will ${subject} ${randomCondition}?`
+    
+    // Set end time to 36 seconds from now (changed from 30)
+    const endTime = new Date(Date.now() + 36 * 1000)
+
+    const newQuestion = new BetQuestion({
+      id: `question-${Date.now()}`,
+      question: questionText,
+      subject: subject,
+      condition: randomCondition,
+      startTime: new Date(),
+      endTime,
+      active: true,
+      streamId: streamId || "default-stream",
+      yesBetAmount: 0,
+      noBetAmount: 0,
+      yesPercentage: 50,
+      noPercentage: 50,
+      totalBetAmount: 0,
+      totalPlayers: 0,
+    })
+
+    await newQuestion.save()
+    
+    // Emit the new question to all clients
+    if (io) {
+      io.emit("new_question", {
+        ...newQuestion.toObject(),
+        subject: subject
+      })
+    }
+    
+    res.status(201).json({
+      success: true,
+      question: newQuestion
+    })
+  } catch (error) {
+    console.error("Create bet question error:", error)
+    res.status(500).json({
+      success: false,
+      message: "Server error while creating bet question",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    })
+  }
+}
+
 exports.placeBetWithPartialPayment = async (req, res) => {
   try {
     console.log("=== PLACE BET WITH PARTIAL PAYMENT START ===")
@@ -3325,7 +3519,16 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         try {
           // Get the current camera holder from the socket manager
           const cameraHolder = socketManager.getCurrentCameraHolder()
-          const subject = cameraHolder?.CameraHolderName || "Player"
+          
+          // Only create a question if there's a valid camera holder
+          if (!cameraHolder || !cameraHolder.CameraHolderName || cameraHolder.CameraHolderName === "None") {
+            return res.status(400).json({
+              success: false,
+              message: "No active camera holder available for betting",
+            })
+          }
+          
+          const subject = cameraHolder.CameraHolderName || "Player"
           
           const conditions = [
             "survive for 5 minutes",
@@ -3337,7 +3540,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
 
           const randomCondition = conditions[Math.floor(Math.random() * conditions.length)]
           const questionText = `Will ${subject} ${randomCondition}?`
-          const endTime = new Date(Date.now() + 30 * 1000) // 36 seconds from now
+          const endTime = new Date(Date.now() + 36 * 1000) // 36 seconds from now (changed from 30)
 
           question = new BetQuestion({
             id: `question-${Date.now()}`,
