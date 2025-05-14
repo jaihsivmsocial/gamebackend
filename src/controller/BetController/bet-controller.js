@@ -1555,9 +1555,9 @@
 //       user: userId,
 //       question: question._id,
 //       choice,
-//       amount: betAmountAfterFee, 
-//       originalAmount: amount, 
-//       platformFee: platformFee, 
+//       amount: betAmountAfterFee,
+//       originalAmount: amount,
+//       platformFee: platformFee,
 //       status: "pending",
 //       timestamp: new Date(),
 //       streamId: streamId,
@@ -1838,129 +1838,135 @@
 
 // module.exports = exports
 
-const Bet = require("../../model/battingModel/Bet.js")
-const BetQuestion = require("../../model/battingModel/BetQuestion.js")
-const User = require("../../model/userModel.js")
-const Transaction = require("../../model/battingModel/Transaction.js")
-const BetStats = require("../../model/battingModel/BetStats.js")
-const mongoose = require("mongoose")
+const Bet = require("../../model/battingModel/Bet.js");
+const BetQuestion = require("../../model/battingModel/BetQuestion.js");
+const User = require("../../model/userModel.js");
+const Transaction = require("../../model/battingModel/Transaction.js");
+const BetStats = require("../../model/battingModel/BetStats.js");
+const mongoose = require("mongoose");
 
-let io
-let socketManager
+let io;
+let socketManager;
 try {
-  socketManager = require("../socket/socket-manager.js")
-  io = socketManager.io
+  socketManager = require("../socket/socket-manager.js");
+  io = socketManager.io;
 } catch (error) {
-  console.log("Socket.io not available, using dummy implementation")
+  console.log("Socket.io not available, using dummy implementation");
   io = {
     emit: (event, data) => {
-      console.log(`[DUMMY IO] Would emit ${event}:`, data)
+      console.log(`[DUMMY IO] Would emit ${event}:`, data);
     },
-  }
+  };
   socketManager = {
-    getCurrentCameraHolder: () => null
-  }
+    getCurrentCameraHolder: () => null,
+  };
 }
 
 // Find the ensureFixedBalance function and replace it with this dynamic balance function
 const ensureUserBalance = async (userId) => {
   try {
-    const user = await User.findById(userId)
+    const user = await User.findById(userId);
     if (user) {
       // No longer setting a fixed balance - using the actual user balance
-      return user
+      return user;
     }
-    return null
+    return null;
   } catch (error) {
-    console.error("Error ensuring user balance:", error)
-    return null
+    console.error("Error ensuring user balance:", error);
+    return null;
   }
-}
+};
 
 // Replace the getUserWalletBalance function with this dynamic version
 exports.getUserWalletBalance = async (req, res) => {
   try {
     // Check if req.user exists before accessing its properties
     if (!req.user) {
-      console.log("No user found in request. Returning default balance.")
+      console.log("No user found in request. Returning default balance.");
       return res.status(200).json({
         success: true,
         balance: 0,
         isAuthenticated: false,
-      })
+      });
     }
 
-    const userId = req.user.id || req.user._id || req.user.userId
+    const userId = req.user.id || req.user._id || req.user.userId;
 
     if (!userId) {
-      console.log("User ID not found in request. Returning default balance.")
+      console.log("User ID not found in request. Returning default balance.");
       return res.status(200).json({
         success: true,
         balance: 0,
         isAuthenticated: false,
-      })
+      });
     }
 
     // Find user with actual balance
-    const user = await User.findById(userId)
+    const user = await User.findById(userId);
 
     if (!user) {
-      console.log("User not found in database. Returning default balance.")
+      console.log("User not found in database. Returning default balance.");
       return res.status(200).json({
         success: true,
         balance: 0,
         isAuthenticated: false,
-      })
+      });
     }
 
-    console.log("Returning actual wallet balance:", user.walletBalance || 0)
+    console.log("Returning actual wallet balance:", user.walletBalance || 0);
 
     // Return actual user balance
     res.status(200).json({
       success: true,
       balance: user.walletBalance || 0,
       isAuthenticated: true,
-    })
+    });
   } catch (error) {
-    console.error("Get wallet balance error:", error)
+    console.error("Get wallet balance error:", error);
     // Even on error, return a successful response with default balance
     res.status(200).json({
       success: true,
       balance: 0,
       isAuthenticated: false,
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    })
+    });
   }
-}
+};
 
 // Update the placeBet function to properly check wallet balance
 exports.placeBet = async (req, res) => {
   try {
-    console.log("=== PLACE BET START ===")
-    const { questionId, choice, amount, streamId } = req.body
+    console.log("=== PLACE BET START ===");
+    const { questionId, choice, amount, streamId } = req.body;
 
     // Add more robust user ID extraction with fallbacks
-    let userId
+    let userId;
     if (req.user) {
-      userId = req.user.id || req.user._id || req.user.userId
-      console.log("Using user ID from token:", userId)
+      userId = req.user.id || req.user._id || req.user.userId;
+      console.log("Using user ID from token:", userId);
     }
 
     if (!userId) {
       return res.status(400).json({
         success: false,
         message: "User ID not found in request",
-      })
+      });
     }
 
-    console.log("Received bet request:", { questionId, choice, amount, streamId, userId })
+    console.log("Received bet request:", {
+      questionId,
+      choice,
+      amount,
+      streamId,
+      userId,
+    });
 
     // Validate bet amount
     if (!amount || amount <= 0) {
       return res.status(400).json({
         success: false,
         message: "Invalid bet amount",
-      })
+      });
     }
 
     // Validate streamId
@@ -1968,22 +1974,22 @@ exports.placeBet = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Stream ID is required",
-      })
+      });
     }
 
     // Find user with actual balance
-    console.log("Finding user with ID:", userId)
-    const user = await User.findById(userId)
+    console.log("Finding user with ID:", userId);
+    const user = await User.findById(userId);
 
     if (!user) {
-      console.log("User not found with ID:", userId)
+      console.log("User not found with ID:", userId);
       return res.status(404).json({
         success: false,
         message: "User not found",
-      })
+      });
     }
-    console.log("Found user:", user.username || user.email || userId)
-    console.log("Current wallet balance:", user.walletBalance || 0)
+    console.log("Found user:", user.username || user.email || userId);
+    console.log("Current wallet balance:", user.walletBalance || 0);
 
     // Check if user has enough balance
     if ((user.walletBalance || 0) < amount) {
@@ -1994,27 +2000,32 @@ exports.placeBet = async (req, res) => {
         insufficientFunds: true,
         currentBalance: user.walletBalance || 0,
         amountNeeded: amount - (user.walletBalance || 0),
-      })
+      });
     }
 
     // Find the question - handle both ObjectId and string ID formats
-    let question = null
+    let question = null;
     try {
-      console.log("Looking for question with ID:", questionId, "Type:", typeof questionId)
+      console.log(
+        "Looking for question with ID:",
+        questionId,
+        "Type:",
+        typeof questionId
+      );
 
       // Try to find by ObjectId first if it's a valid ObjectId
       if (mongoose.Types.ObjectId.isValid(questionId)) {
-        question = await BetQuestion.findById(questionId)
-        console.log("Searched by ObjectId, found:", question ? "Yes" : "No")
+        question = await BetQuestion.findById(questionId);
+        console.log("Searched by ObjectId, found:", question ? "Yes" : "No");
       }
 
       // If not found, try to find by string ID
       if (!question) {
         try {
-          question = await BetQuestion.findOne({ id: questionId })
-          console.log("Searched by string ID, found:", question ? "Yes" : "No")
+          question = await BetQuestion.findOne({ id: questionId });
+          console.log("Searched by string ID, found:", question ? "Yes" : "No");
         } catch (err) {
-          console.log("Error searching by string ID:", err.message)
+          console.log("Error searching by string ID:", err.message);
         }
       }
 
@@ -2023,16 +2034,18 @@ exports.placeBet = async (req, res) => {
         try {
           question = await BetQuestion.findOne({
             question: { $regex: questionId.replace("question-", "") },
-          })
-          console.log("Searched by regex, found:", question ? "Yes" : "No")
+          });
+          console.log("Searched by regex, found:", question ? "Yes" : "No");
         } catch (err) {
-          console.log("Error searching by regex:", err.message)
+          console.log("Error searching by regex:", err.message);
         }
       }
 
       // If still not found, get the most recent active question
       if (!question) {
-        console.log("No question found with ID, getting most recent active question")
+        console.log(
+          "No question found with ID, getting most recent active question"
+        );
         try {
           const activeQuestions = await BetQuestion.find({
             active: true,
@@ -2040,45 +2053,54 @@ exports.placeBet = async (req, res) => {
             endTime: { $gt: new Date() },
           })
             .sort({ createdAt: -1 })
-            .limit(1)
+            .limit(1);
 
           if (activeQuestions.length > 0) {
-            question = activeQuestions[0]
-            console.log("Using most recent active question as fallback:", question._id)
+            question = activeQuestions[0];
+            console.log(
+              "Using most recent active question as fallback:",
+              question._id
+            );
           }
         } catch (fallbackError) {
-          console.error("Error finding active questions:", fallbackError)
+          console.error("Error finding active questions:", fallbackError);
         }
       }
 
       // If still no question found, create a new one
       if (!question) {
-        console.log("No active questions found, creating a new one")
+        console.log("No active questions found, creating a new one");
         try {
           // Get the current camera holder from the socket manager
-          const cameraHolder = socketManager.getCurrentCameraHolder()
-          
+          const cameraHolder = socketManager.getCurrentCameraHolder();
+
           // Only create a question if there's a valid camera holder
-          if (!cameraHolder || !cameraHolder.CameraHolderName || cameraHolder.CameraHolderName === "None") {
+          if (
+            !cameraHolder ||
+            !cameraHolder.CameraHolderName ||
+            cameraHolder.CameraHolderName === "None"
+          ) {
             return res.status(400).json({
               success: false,
               message: "No active camera holder available for betting",
-            })
+            });
           }
-          
-          const subject = cameraHolder.CameraHolderName || "Player"
-          
-          const conditions = [
-            "survive for 5 minutes",
-            "defeat the boss",
-            "reach the checkpoint",
-            "collect 10 coins",
-            "find the hidden treasure",
-          ]
 
-          const randomCondition = conditions[Math.floor(Math.random() * conditions.length)]
-          const questionText = `Will ${subject} ${randomCondition}?`
-          const endTime = new Date(Date.now() + 36 * 1000) // 36 seconds from now (changed from 30)
+          const subject = cameraHolder.CameraHolderName || "Player";
+
+          const conditions = [
+           "will X survive for next 20 Sec",
+      "Will X be able to get 2 Kill in 20 Sec",
+      "will X survive for next 30 Sec",
+      "Will X be able to get 3 Kill in 30 Sec",
+      "will X survive for next 40 Sec",
+      "Will X be able to get 5 Kill in 40 Sec",
+          ];
+
+          const randomCondition =
+            conditions[Math.floor(Math.random() * conditions.length)];
+          const questionText = `Will ${subject} ${randomCondition}?`;
+          const endTime = new Date(Date.now() + 36 * 1000); // 36 seconds from now (changed from 30)
 
           question = new BetQuestion({
             id: `question-${Date.now()}`,
@@ -2095,36 +2117,42 @@ exports.placeBet = async (req, res) => {
             noPercentage: 50,
             totalBetAmount: 0,
             totalPlayers: 0,
-          })
+          });
 
-          await question.save()
-          console.log("Created new question on demand:", question._id)
+          await question.save();
+          console.log("Created new question on demand:", question._id);
         } catch (createError) {
-          console.error("Error creating new question:", createError)
-          throw createError // Re-throw to be caught by the outer try/catch
+          console.error("Error creating new question:", createError);
+          throw createError; // Re-throw to be caught by the outer try/catch
         }
       }
     } catch (error) {
-      console.error("Error finding/creating question:", error)
+      console.error("Error finding/creating question:", error);
       return res.status(404).json({
         success: false,
         message: "Bet question not found and could not create a new one",
         error: error.message,
-      })
+      });
     }
 
     if (!question) {
       // Create a debug endpoint to check what questions exist
-      const allQuestions = await BetQuestion.find().sort({ createdAt: -1 }).limit(5)
+      const allQuestions = await BetQuestion.find()
+        .sort({ createdAt: -1 })
+        .limit(5);
       console.error(
         "No question found. Recent questions:",
-        allQuestions.map((q) => ({ id: q._id, active: q.active, resolved: q.resolved })),
-      )
+        allQuestions.map((q) => ({
+          id: q._id,
+          active: q.active,
+          resolved: q.resolved,
+        }))
+      );
 
       return res.status(404).json({
         success: false,
         message: "Bet question not found. Please refresh and try again.",
-      })
+      });
     }
 
     // Check if question is still active
@@ -2132,7 +2160,7 @@ exports.placeBet = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "This betting round has ended",
-      })
+      });
     }
 
     // Check if countdown has expired
@@ -2140,19 +2168,21 @@ exports.placeBet = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Betting time has expired for this question",
-      })
+      });
     }
 
     // Calculate platform fee (5% of bet amount)
-    const platformFeePercentage = 0.05
-    const platformFee = Math.round(amount * platformFeePercentage)
-    const betAmountAfterFee = amount - platformFee
+    const platformFeePercentage = 0.05;
+    const platformFee = Math.round(amount * platformFeePercentage);
+    const betAmountAfterFee = amount - platformFee;
 
-    console.log(`Calculating platform fee: ${platformFee} (${platformFeePercentage * 100}% of ${amount})`)
-    console.log(`Bet amount after fee: ${betAmountAfterFee}`)
+    console.log(
+      `Calculating platform fee: ${platformFee} (${platformFeePercentage * 100}% of ${amount})`
+    );
+    console.log(`Bet amount after fee: ${betAmountAfterFee}`);
 
     // Create the bet with the amount after fee
-    console.log("Creating new bet")
+    console.log("Creating new bet");
     const bet = new Bet({
       user: userId,
       question: question._id,
@@ -2166,19 +2196,24 @@ exports.placeBet = async (req, res) => {
       matchedAmount: 0,
       potentialPayout: 0,
       processed: false,
-    })
+    });
 
     // Store the previous balance for response
-    const previousBalance = user.walletBalance || 0
+    const previousBalance = user.walletBalance || 0;
 
     // Update user's wallet balance
-    console.log("Updating user wallet balance from", previousBalance, "to", previousBalance - amount)
-    user.walletBalance = (previousBalance - amount)
-    user.totalBets = (user.totalBets || 0) + 1
-    await user.save()
+    console.log(
+      "Updating user wallet balance from",
+      previousBalance,
+      "to",
+      previousBalance - amount
+    );
+    user.walletBalance = previousBalance - amount;
+    user.totalBets = (user.totalBets || 0) + 1;
+    await user.save();
 
     // Create transaction record for the bet
-    console.log("Creating bet transaction record")
+    console.log("Creating bet transaction record");
     const betTransaction = new Transaction({
       user: userId,
       type: "bet_place",
@@ -2186,11 +2221,11 @@ exports.placeBet = async (req, res) => {
       bet: bet._id,
       question: question._id,
       balanceAfter: user.walletBalance + platformFee, // Temporary balance after just the bet
-    })
-    await betTransaction.save()
+    });
+    await betTransaction.save();
 
     // Create transaction record for the platform fee
-    console.log("Creating platform fee transaction record")
+    console.log("Creating platform fee transaction record");
     const feeTransaction = new Transaction({
       user: userId,
       type: "platform_fee",
@@ -2198,124 +2233,138 @@ exports.placeBet = async (req, res) => {
       bet: bet._id,
       question: question._id,
       balanceAfter: user.walletBalance, // Final balance after both bet and fee
-    })
-    await feeTransaction.save()
+    });
+    await feeTransaction.save();
 
     // Update question stats with the bet amount after fee
-    console.log("Updating question stats")
+    console.log("Updating question stats");
     if (choice === "Yes") {
-      question.yesBetAmount = (question.yesBetAmount || 0) + betAmountAfterFee
+      question.yesBetAmount = (question.yesBetAmount || 0) + betAmountAfterFee;
       // Check if this user has already bet on this question with this choice
       const existingYesBet = await Bet.findOne({
         user: userId,
         question: question._id,
         choice: "Yes",
         _id: { $ne: bet._id }, // Exclude the current bet
-      })
+      });
 
       if (!existingYesBet) {
         // Only increment if this is the first bet from this user for this choice
-        question.yesUserCount = (question.yesUserCount || 0) + 1
+        question.yesUserCount = (question.yesUserCount || 0) + 1;
       }
     } else {
-      question.noBetAmount = (question.noBetAmount || 0) + betAmountAfterFee
+      question.noBetAmount = (question.noBetAmount || 0) + betAmountAfterFee;
       // Check if this user has already bet on this question with this choice
       const existingNoBet = await Bet.findOne({
         user: userId,
         question: question._id,
         choice: "No",
         _id: { $ne: bet._id }, // Exclude the current bet
-      })
+      });
 
       if (!existingNoBet) {
         // Only increment if this is the first bet from this user for this choice
-        question.noUserCount = (question.noUserCount || 0) + 1
+        question.noUserCount = (question.noUserCount || 0) + 1;
       }
     }
 
-    question.totalBetAmount = (question.totalBetAmount || 0) + betAmountAfterFee
+    question.totalBetAmount =
+      (question.totalBetAmount || 0) + betAmountAfterFee;
 
     // Check if this user has already bet on this question (regardless of choice)
     const existingBet = await Bet.findOne({
       user: userId,
       question: question._id,
       _id: { $ne: bet._id }, // Exclude the current bet
-    })
+    });
 
     if (!existingBet) {
       // Only increment if this is the first bet from this user on this question
-      question.totalPlayers = (question.totalPlayers || 0) + 1
+      question.totalPlayers = (question.totalPlayers || 0) + 1;
     }
 
-    question.totalPlatformFees = (question.totalPlatformFees || 0) + platformFee
+    question.totalPlatformFees =
+      (question.totalPlatformFees || 0) + platformFee;
 
     // Recalculate percentages based on user counts instead of bet amounts
-    const totalUsers = (question.yesUserCount || 0) + (question.noUserCount || 0)
+    const totalUsers =
+      (question.yesUserCount || 0) + (question.noUserCount || 0);
     if (totalUsers > 0) {
-      question.yesPercentage = Math.round(((question.yesUserCount || 0) / totalUsers) * 100)
-      question.noPercentage = Math.round(((question.noUserCount || 0) / totalUsers) * 100)
+      question.yesPercentage = Math.round(
+        ((question.yesUserCount || 0) / totalUsers) * 100
+      );
+      question.noPercentage = Math.round(
+        ((question.noUserCount || 0) / totalUsers) * 100
+      );
 
       // Ensure percentages add up to 100%
       if (question.yesPercentage + question.noPercentage !== 100) {
         // Adjust the larger percentage to make the sum 100
         if (question.yesPercentage > question.noPercentage) {
-          question.yesPercentage = 100 - question.noPercentage
+          question.yesPercentage = 100 - question.noPercentage;
         } else {
-          question.noPercentage = 100 - question.yesPercentage
+          question.noPercentage = 100 - question.yesPercentage;
         }
       }
     } else {
       // Default to 50/50 if no users have bet yet
-      question.yesPercentage = 50
-      question.noPercentage = 50
+      question.yesPercentage = 50;
+      question.noPercentage = 50;
     }
 
-    await question.save()
+    await question.save();
 
     // Calculate potential payout based on current odds
-    console.log("Calculating potential payout")
+    console.log("Calculating potential payout");
     const odds =
-      choice === "Yes" ? question.noPercentage / question.yesPercentage : question.yesPercentage / question.noPercentage
+      choice === "Yes"
+        ? question.noPercentage / question.yesPercentage
+        : question.yesPercentage / question.noPercentage;
 
     // Calculate potential winnings with 5% platform fee
     // Formula: payout = bet * 2 * 0.95
-    const platformFeePercentageOnWinnings = 0.05
-    const grossPotentialWinnings = betAmountAfterFee * odds
-    const platformFeeOnWinnings = (betAmountAfterFee + grossPotentialWinnings) * platformFeePercentageOnWinnings
-    const potentialPayout = betAmountAfterFee + grossPotentialWinnings - platformFeeOnWinnings
+    const platformFeePercentageOnWinnings = 0.05;
+    const grossPotentialWinnings = betAmountAfterFee * odds;
+    const platformFeeOnWinnings =
+      (betAmountAfterFee + grossPotentialWinnings) *
+      platformFeePercentageOnWinnings;
+    const potentialPayout =
+      betAmountAfterFee + grossPotentialWinnings - platformFeeOnWinnings;
 
-    console.log(`Potential payout calculation:`)
-    console.log(`- Bet amount after initial fee: ${betAmountAfterFee}`)
-    console.log(`- Odds: ${odds}`)
-    console.log(`- Gross potential winnings: ${grossPotentialWinnings}`)
-    console.log(`- Platform fee (${platformFeePercentageOnWinnings * 100}%): ${platformFeeOnWinnings}`)
-    console.log(`- Net potential payout: ${potentialPayout}`)
+    console.log(`Potential payout calculation:`);
+    console.log(`- Bet amount after initial fee: ${betAmountAfterFee}`);
+    console.log(`- Odds: ${odds}`);
+    console.log(`- Gross potential winnings: ${grossPotentialWinnings}`);
+    console.log(
+      `- Platform fee (${platformFeePercentageOnWinnings * 100}%): ${platformFeeOnWinnings}`
+    );
+    console.log(`- Net potential payout: ${potentialPayout}`);
 
-    bet.potentialPayout = potentialPayout
-    bet.grossPotentialPayout = betAmountAfterFee + grossPotentialWinnings
-    bet.platformFeeOnWinnings = platformFeeOnWinnings
-    await bet.save()
+    bet.potentialPayout = potentialPayout;
+    bet.grossPotentialPayout = betAmountAfterFee + grossPotentialWinnings;
+    bet.platformFeeOnWinnings = platformFeeOnWinnings;
+    await bet.save();
 
     // Try to match the bet
-    console.log("Matching bet")
+    console.log("Matching bet");
     try {
-      await matchBet(bet, question)
+      await matchBet(bet, question);
     } catch (matchError) {
-      console.error("Error matching bet:", matchError)
+      console.error("Error matching bet:", matchError);
       // Continue even if matching fails
     }
 
     // Update global stats
-    console.log("Updating global stats")
+    console.log("Updating global stats");
     try {
-      await updateBetStats(betAmountAfterFee, platformFee)
+      await updateBetStats(betAmountAfterFee, platformFee);
     } catch (statsError) {
-      console.error("Error updating stats:", statsError)
+      console.error("Error updating stats:", statsError);
       // Continue even if stats update fails
     }
 
     // Emit socket events for real-time updates
-    console.log("Emitting socket events")
+    console.log("Emitting socket events");
     if (io) {
       // Emit bet placed event with updated question data
       io.emit("betPlaced", {
@@ -2325,16 +2374,16 @@ exports.placeBet = async (req, res) => {
         totalBetAmount: question.totalBetAmount,
         totalPlayers: question.totalPlayers,
         newPlayer: true, // Indicate this is a new player
-      })
+      });
 
       // Also emit specific stats updates
       io.emit("total_bets_update", {
         amount: question.totalBetAmount,
-      })
+      });
 
       io.emit("player_count_update", {
         count: question.totalPlayers,
-      })
+      });
 
       // Emit comprehensive betting stats
       io.emit("betting_stats", {
@@ -2343,7 +2392,7 @@ exports.placeBet = async (req, res) => {
         totalPlayers: question.totalPlayers,
         activePlayers: question.totalPlayers, // Simplification
         totalPlatformFees: question.totalPlatformFees || 0,
-      })
+      });
 
       // IMPORTANT: Emit wallet update event with real-time balance
       io.emit("wallet_update", {
@@ -2352,7 +2401,7 @@ exports.placeBet = async (req, res) => {
         previousBalance: previousBalance,
         change: -amount,
         platformFee: platformFee,
-      })
+      });
 
       // Add a specific bet_response event for immediate UI updates
       io.emit("bet_response", {
@@ -2362,12 +2411,12 @@ exports.placeBet = async (req, res) => {
         change: -amount,
         platformFee: platformFee,
         userId: userId,
-      })
+      });
     }
 
-    console.log("Bet placed successfully")
-    console.log("New balance:", user.walletBalance)
-    console.log("Previous balance:", previousBalance)
+    console.log("Bet placed successfully");
+    console.log("New balance:", user.walletBalance);
+    console.log("Previous balance:", previousBalance);
 
     res.status(201).json({
       success: true,
@@ -2386,11 +2435,11 @@ exports.placeBet = async (req, res) => {
         totalBetAmount: question.totalBetAmount,
         totalPlayers: question.totalPlayers,
       },
-    })
-    console.log("=== PLACE BET END ===")
+    });
+    console.log("=== PLACE BET END ===");
   } catch (error) {
-    console.error("Place bet error:", error)
-    console.error("Error stack:", error.stack)
+    console.error("Place bet error:", error);
+    console.error("Error stack:", error.stack);
 
     // Check for specific error types
     if (error.name === "CastError") {
@@ -2398,7 +2447,7 @@ exports.placeBet = async (req, res) => {
         success: false,
         message: "Invalid ID format",
         error: error.message,
-      })
+      });
     }
 
     if (error.name === "ValidationError") {
@@ -2406,7 +2455,7 @@ exports.placeBet = async (req, res) => {
         success: false,
         message: "Validation error",
         error: error.message,
-      })
+      });
     }
 
     // Generic error response
@@ -2414,9 +2463,9 @@ exports.placeBet = async (req, res) => {
       success: false,
       message: "Server error while placing bet",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    })
+    });
   }
-}
+};
 
 // Update the resetBalance function to accept a custom amount
 exports.resetBalance = async (req, res) => {
@@ -2425,39 +2474,42 @@ exports.resetBalance = async (req, res) => {
       return res.status(401).json({
         success: false,
         message: "Authentication required",
-      })
+      });
     }
 
-    const userId = req.user.id || req.user._id || req.user.userId
+    const userId = req.user.id || req.user._id || req.user.userId;
 
     if (!userId) {
       return res.status(400).json({
         success: false,
         message: "User ID not found in request",
-      })
+      });
     }
 
     // Find the user
-    const user = await User.findById(userId)
+    const user = await User.findById(userId);
 
     if (!user) {
       return res.status(404).json({
         success: false,
         message: "User not found",
-      })
+      });
     }
 
     // Store previous balance for response
-    const previousBalance = user.walletBalance || 0
+    const previousBalance = user.walletBalance || 0;
 
     // Get the amount from request body or use 0 as default
-    const resetAmount = req.body.amount !== undefined ? Number(req.body.amount) : 0
+    const resetAmount =
+      req.body.amount !== undefined ? Number(req.body.amount) : 0;
 
-    console.log(`Resetting wallet balance for user ${userId} from ${previousBalance} to ${resetAmount}`)
+    console.log(
+      `Resetting wallet balance for user ${userId} from ${previousBalance} to ${resetAmount}`
+    );
 
     // Reset the balance to the specified amount or 0
-    user.walletBalance = resetAmount
-    await user.save()
+    user.walletBalance = resetAmount;
+    await user.save();
 
     // Emit wallet update event
     if (io) {
@@ -2466,7 +2518,7 @@ exports.resetBalance = async (req, res) => {
         newBalance: resetAmount,
         previousBalance: previousBalance,
         change: resetAmount - previousBalance,
-      })
+      });
     }
 
     res.status(200).json({
@@ -2474,16 +2526,16 @@ exports.resetBalance = async (req, res) => {
       message: `Wallet balance reset to ${resetAmount}`,
       newBalance: resetAmount,
       previousBalance: previousBalance,
-    })
+    });
   } catch (error) {
-    console.error("Reset balance error:", error)
+    console.error("Reset balance error:", error);
     res.status(500).json({
       success: false,
       message: "Server error while resetting wallet balance",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    })
+    });
   }
-}
+};
 
 // Add a new API endpoint to update wallet balance
 exports.updateWalletBalance = async (req, res) => {
@@ -2492,45 +2544,47 @@ exports.updateWalletBalance = async (req, res) => {
       return res.status(401).json({
         success: false,
         message: "Authentication required",
-      })
+      });
     }
 
-    const userId = req.user.id || req.user._id || req.user.userId
+    const userId = req.user.id || req.user._id || req.user.userId;
 
     if (!userId) {
       return res.status(400).json({
         success: false,
         message: "User ID not found in request",
-      })
+      });
     }
 
-    const { amount } = req.body
+    const { amount } = req.body;
 
     if (amount === undefined) {
       return res.status(400).json({
         success: false,
         message: "Amount is required",
-      })
+      });
     }
 
     // Find the user
-    const user = await User.findById(userId)
+    const user = await User.findById(userId);
 
     if (!user) {
       return res.status(404).json({
         success: false,
         message: "User not found",
-      })
+      });
     }
 
     // Store previous balance for response
-    const previousBalance = user.walletBalance || 0
+    const previousBalance = user.walletBalance || 0;
 
     // Update the balance with the provided amount
-    user.walletBalance = Number(amount)
-    await user.save()
+    user.walletBalance = Number(amount);
+    await user.save();
 
-    console.log(`Updated wallet balance for user ${userId} from ${previousBalance} to ${user.walletBalance}`)
+    console.log(
+      `Updated wallet balance for user ${userId} from ${previousBalance} to ${user.walletBalance}`
+    );
 
     // Emit wallet update event
     if (io) {
@@ -2539,28 +2593,28 @@ exports.updateWalletBalance = async (req, res) => {
         newBalance: user.walletBalance,
         previousBalance: previousBalance,
         change: user.walletBalance - previousBalance,
-      })
+      });
     }
 
     res.status(200).json({
       success: true,
       newBalance: user.walletBalance,
       previousBalance: previousBalance,
-    })
+    });
   } catch (error) {
-    console.error("Update wallet balance error:", error)
+    console.error("Update wallet balance error:", error);
     res.status(500).json({
       success: false,
       message: "Server error while updating wallet balance",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    })
+    });
   }
-}
+};
 
 // Match a bet with opposite bets - updated to handle bet amount after fee
 const matchBet = async (newBet, question) => {
   try {
-    const oppositeChoice = newBet.choice === "Yes" ? "No" : "Yes"
+    const oppositeChoice = newBet.choice === "Yes" ? "No" : "Yes";
 
     // Find unmatched or partially matched bets with the opposite choice
     const oppositeBets = await Bet.find({
@@ -2568,71 +2622,79 @@ const matchBet = async (newBet, question) => {
       choice: oppositeChoice,
       status: { $in: ["pending", "partially_matched"] },
       processed: false,
-    }).sort({ timestamp: 1 }) // First in, first matched
+    }).sort({ timestamp: 1 }); // First in, first matched
 
-    let remainingAmount = newBet.amount // This is already the amount after fee
-    let matchedAmount = 0
+    let remainingAmount = newBet.amount; // This is already the amount after fee
+    let matchedAmount = 0;
 
     // Try to match with opposite bets
     for (const oppositeBet of oppositeBets) {
-      if (remainingAmount <= 0) break
+      if (remainingAmount <= 0) break;
 
-      const oppositeUnmatchedAmount = oppositeBet.amount - (oppositeBet.matchedAmount || 0)
+      const oppositeUnmatchedAmount =
+        oppositeBet.amount - (oppositeBet.matchedAmount || 0);
 
       if (oppositeUnmatchedAmount > 0) {
-        const amountToMatch = Math.min(remainingAmount, oppositeUnmatchedAmount)
+        const amountToMatch = Math.min(
+          remainingAmount,
+          oppositeUnmatchedAmount
+        );
 
         // Update the opposite bet
-        oppositeBet.matchedAmount = (oppositeBet.matchedAmount || 0) + amountToMatch
-        oppositeBet.status = oppositeBet.matchedAmount === oppositeBet.amount ? "matched" : "partially_matched"
-        await oppositeBet.save()
+        oppositeBet.matchedAmount =
+          (oppositeBet.matchedAmount || 0) + amountToMatch;
+        oppositeBet.status =
+          oppositeBet.matchedAmount === oppositeBet.amount
+            ? "matched"
+            : "partially_matched";
+        await oppositeBet.save();
 
         // Update the new bet
-        matchedAmount += amountToMatch
-        remainingAmount -= amountToMatch
+        matchedAmount += amountToMatch;
+        remainingAmount -= amountToMatch;
       }
     }
 
     // Update the new bet status
-    newBet.matchedAmount = matchedAmount
+    newBet.matchedAmount = matchedAmount;
 
     if (matchedAmount === 0) {
-      newBet.status = "pending"
+      newBet.status = "pending";
     } else if (matchedAmount === newBet.amount) {
-      newBet.status = "matched"
+      newBet.status = "matched";
     } else {
-      newBet.status = "partially_matched"
+      newBet.status = "partially_matched";
     }
 
     // Calculate potential payout (matched amount * 2)
     // No additional platform fee on payout calculation since we already took it upfront
-    newBet.potentialPayout = matchedAmount * 2
+    newBet.potentialPayout = matchedAmount * 2;
 
-    await newBet.save()
+    await newBet.save();
   } catch (error) {
-    console.error("Match bet error:", error)
-    throw error
+    console.error("Match bet error:", error);
+    throw error;
   }
-}
+};
 
 // Update global betting statistics - updated to track platform fees
 const updateBetStats = async (betAmount, platformFee) => {
   try {
     // Get current week's start and end dates
-    const now = new Date()
-    const startOfWeek = new Date(now)
-    startOfWeek.setDate(now.getDate() - now.getDay())
-    startOfWeek.setHours(0, 0, 0, 0)
+    const now = new Date();
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay());
+    startOfWeek.setHours(0, 0, 0, 0);
 
-    const endOfWeek = new Date(startOfWeek)
-    endOfWeek.setDate(startOfWeek.getDate() + 6)
-    endOfWeek.setHours(23, 59, 59, 999)
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
 
     // Find or create stats for current week
     let stats = await BetStats.findOne({
       weekStartDate: { $lte: now },
       weekEndDate: { $gte: now },
-    })
+    });
 
     if (!stats) {
       stats = new BetStats({
@@ -2643,114 +2705,114 @@ const updateBetStats = async (betAmount, platformFee) => {
         activePlayers: 0,
         weekStartDate: startOfWeek,
         weekEndDate: endOfWeek,
-      })
+      });
     }
 
     // Update stats
-    stats.totalBetsAmount = (stats.totalBetsAmount || 0) + betAmount
-    stats.totalPlatformFees = (stats.totalPlatformFees || 0) + platformFee
-    stats.updatedAt = now
+    stats.totalBetsAmount = (stats.totalBetsAmount || 0) + betAmount;
+    stats.totalPlatformFees = (stats.totalPlatformFees || 0) + platformFee;
+    stats.updatedAt = now;
 
-    await stats.save()
+    await stats.save();
   } catch (error) {
-    console.error("Update bet stats error:", error)
-    throw error
+    console.error("Update bet stats error:", error);
+    throw error;
   }
-}
+};
 
 // Resolve a bet question - updated to handle platform fees
 exports.resolveBetQuestion = async (req, res) => {
   try {
-    const { questionId, outcome } = req.body
+    const { questionId, outcome } = req.body;
 
     if (!["Yes", "No"].includes(outcome)) {
       return res.status(400).json({
         success: false,
         message: "Invalid outcome. Must be Yes or No",
-      })
+      });
     }
 
     // Find the question - handle both ObjectId and string ID formats
-    let question = null
+    let question = null;
 
     // Try to find by ObjectId first if it's a valid ObjectId
     if (mongoose.Types.ObjectId.isValid(questionId)) {
-      question = await BetQuestion.findById(questionId)
+      question = await BetQuestion.findById(questionId);
     }
 
     // If not found, try to find by string ID
     if (!question) {
-      question = await BetQuestion.findOne({ id: questionId })
+      question = await BetQuestion.findOne({ id: questionId });
     }
 
     // If still not found, try by regex on question text
     if (!question && questionId.startsWith("question-")) {
       question = await BetQuestion.findOne({
         question: { $regex: questionId.replace("question-", "") },
-      })
+      });
     }
 
     if (!question) {
       return res.status(404).json({
         success: false,
         message: "Question not found",
-      })
+      });
     }
 
     if (question.resolved) {
       return res.status(400).json({
         success: false,
         message: "Question already resolved",
-      })
+      });
     }
 
     // Update question
-    question.resolved = true
-    question.outcome = outcome
-    question.active = false
-    await question.save()
+    question.resolved = true;
+    question.outcome = outcome;
+    question.active = false;
+    await question.save();
 
     // Process all bets for this question
-    await processBetsForQuestion(question._id, outcome)
+    await processBetsForQuestion(question._id, outcome);
 
     // Emit socket event for question resolution
     if (io) {
       io.emit("questionResolved", {
         questionId: question._id,
         outcome,
-      })
+      });
     }
 
     res.status(200).json({
       success: true,
       message: `Question resolved with outcome: ${outcome}`,
-    })
+    });
   } catch (error) {
-    console.error("Resolve bet question error:", error)
+    console.error("Resolve bet question error:", error);
     res.status(500).json({
       success: false,
       message: "Server error while resolving bet question",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    })
+    });
   }
-}
+};
 
 // Process all bets for a resolved question - updated to handle platform fees
 const processBetsForQuestion = async (questionId, outcome) => {
   try {
     // Get all bets for this question
-    const bets = await Bet.find({ question: questionId, processed: false })
+    const bets = await Bet.find({ question: questionId, processed: false });
 
     for (const bet of bets) {
       // Skip already processed bets
-      if (bet.processed) continue
+      if (bet.processed) continue;
 
-      const user = await User.findById(bet.user)
-      if (!user) continue
+      const user = await User.findById(bet.user);
+      if (!user) continue;
 
       // Handle unmatched amounts - refund
       if (bet.matchedAmount < bet.amount) {
-        const refundAmount = bet.amount - bet.matchedAmount
+        const refundAmount = bet.amount - bet.matchedAmount;
 
         // Create refund transaction
         const refundTransaction = new Transaction({
@@ -2760,44 +2822,46 @@ const processBetsForQuestion = async (questionId, outcome) => {
           bet: bet._id,
           question: questionId,
           balanceAfter: user.walletBalance + refundAmount,
-        })
-        await refundTransaction.save()
+        });
+        await refundTransaction.save();
 
         // Update user balance with refund
-        user.walletBalance += refundAmount
-        await user.save()
+        user.walletBalance += refundAmount;
+        await user.save();
       }
 
       // Handle matched amounts - determine win/loss
       if (bet.matchedAmount > 0) {
-        const isWinner = bet.choice === outcome
+        const isWinner = bet.choice === outcome;
 
         if (isWinner) {
           // Winner gets their matched amount back plus winnings with 5% platform fee
           // New formula: payout = bet * 2 * 0.95
-          const platformFeePercentageOnWin = 0.05
-          const grossWinAmount = bet.matchedAmount * 2
-          const platformFee = grossWinAmount * platformFeePercentageOnWin
-          const winAmount = grossWinAmount - platformFee
+          const platformFeePercentageOnWin = 0.05;
+          const grossWinAmount = bet.matchedAmount * 2;
+          const platformFee = grossWinAmount * platformFeePercentageOnWin;
+          const winAmount = grossWinAmount - platformFee;
 
-          console.log(`Win calculation for bet ${bet._id}:`)
-          console.log(`- Matched amount: ${bet.matchedAmount}`)
-          console.log(`- Gross win (2x): ${grossWinAmount}`)
-          console.log(`- Platform fee (${platformFeePercentageOnWin * 100}%): ${platformFee}`)
-          console.log(`- Net win amount: ${winAmount}`)
+          console.log(`Win calculation for bet ${bet._id}:`);
+          console.log(`- Matched amount: ${bet.matchedAmount}`);
+          console.log(`- Gross win (2x): ${grossWinAmount}`);
+          console.log(
+            `- Platform fee (${platformFeePercentageOnWin * 100}%): ${platformFee}`
+          );
+          console.log(`- Net win amount: ${winAmount}`);
 
           // Calculate the actual profit (winnings minus the original bet amount)
-          const profit = winAmount - bet.matchedAmount
+          const profit = winAmount - bet.matchedAmount;
 
           // Update biggest win if applicable
           if (profit > (user.biggestWin || 0)) {
-            user.biggestWin = profit
-            await user.save()
-            console.log(`New biggest win for user ${user._id}: ${profit}`)
+            user.biggestWin = profit;
+            await user.save();
+            console.log(`New biggest win for user ${user._id}: ${profit}`);
           }
 
           // Update weekly stats if applicable
-          await updateBiggestWinThisWeek(profit)
+          await updateBiggestWinThisWeek(profit);
 
           // Create win transaction
           const winTransaction = new Transaction({
@@ -2808,8 +2872,8 @@ const processBetsForQuestion = async (questionId, outcome) => {
             question: questionId,
             balanceAfter: user.walletBalance + winAmount,
             profit: profit, // Store the profit for easier querying
-          })
-          await winTransaction.save()
+          });
+          await winTransaction.save();
 
           // Create platform fee transaction
           const feeTransaction = new Transaction({
@@ -2820,18 +2884,18 @@ const processBetsForQuestion = async (questionId, outcome) => {
             question: questionId,
             balanceAfter: user.walletBalance + winAmount,
             description: "Platform fee on winnings",
-          })
-          await feeTransaction.save()
+          });
+          await feeTransaction.save();
 
           // Update user balance with winnings
-          user.walletBalance += winAmount
-          await user.save()
+          user.walletBalance += winAmount;
+          await user.save();
 
-          bet.status = "won"
-          bet.platformFeeOnWin = platformFee
-          bet.grossWinAmount = grossWinAmount
-          bet.netWinAmount = winAmount
-          bet.profit = profit // Store the profit for easier querying
+          bet.status = "won";
+          bet.platformFeeOnWin = platformFee;
+          bet.grossWinAmount = grossWinAmount;
+          bet.netWinAmount = winAmount;
+          bet.profit = profit; // Store the profit for easier querying
 
           // Emit socket event for win
           if (io) {
@@ -2842,7 +2906,7 @@ const processBetsForQuestion = async (questionId, outcome) => {
               grossAmount: grossWinAmount,
               platformFee: platformFee,
               questionId: questionId,
-            })
+            });
 
             // Also emit wallet update
             io.emit("wallet_update", {
@@ -2852,46 +2916,46 @@ const processBetsForQuestion = async (questionId, outcome) => {
               change: winAmount,
               platformFee: platformFee,
               grossWinAmount: grossWinAmount,
-            })
+            });
           }
         } else {
           // Loser already had their matched amount deducted when placing the bet
-          bet.status = "lost"
+          bet.status = "lost";
         }
       } else {
         // Fully unmatched bet
-        bet.status = "unmatched"
+        bet.status = "unmatched";
       }
 
-      bet.processed = true
-      await bet.save()
+      bet.processed = true;
+      await bet.save();
     }
   } catch (error) {
-    console.error("Process bets error:", error)
-    throw error
+    console.error("Process bets error:", error);
+    throw error;
   }
-}
+};
 
 // Update biggest win this week in stats
 const updateBiggestWinThisWeek = async (winAmount) => {
   try {
-    const now = new Date()
+    const now = new Date();
 
     // Find or create stats for the current week
     let stats = await BetStats.findOne({
       weekStartDate: { $lte: now },
       weekEndDate: { $gte: now },
-    })
+    });
 
     if (!stats) {
       // Calculate week start and end dates
-      const startOfWeek = new Date(now)
-      startOfWeek.setDate(now.getDate() - now.getDay())
-      startOfWeek.setHours(0, 0, 0, 0)
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - now.getDay());
+      startOfWeek.setHours(0, 0, 0, 0);
 
-      const endOfWeek = new Date(startOfWeek)
-      endOfWeek.setDate(startOfWeek.getDate() + 6)
-      endOfWeek.setHours(23, 59, 59, 999)
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+      endOfWeek.setHours(23, 59, 59, 999);
 
       stats = new BetStats({
         totalBetsAmount: 0,
@@ -2902,87 +2966,97 @@ const updateBiggestWinThisWeek = async (winAmount) => {
         weekStartDate: startOfWeek,
         weekEndDate: endOfWeek,
         streamId: "default-stream",
-      })
+      });
     }
 
     // Update biggest win if the new win is larger
     if (winAmount > (stats.biggestWinThisWeek || 0)) {
-      console.log(`New biggest win this week: ${winAmount} (previous: ${stats.biggestWinThisWeek || 0})`)
-      stats.biggestWinThisWeek = winAmount
-      console.log(`New biggest win this week: ${winAmount} (previous: ${stats.biggestWinThisWeek || 0})`)
-      await stats.save()
+      console.log(
+        `New biggest win this week: ${winAmount} (previous: ${stats.biggestWinThisWeek || 0})`
+      );
+      stats.biggestWinThisWeek = winAmount;
+      console.log(
+        `New biggest win this week: ${winAmount} (previous: ${stats.biggestWinThisWeek || 0})`
+      );
+      await stats.save();
 
       // Broadcast the new biggest win to all clients
       if (io) {
         io.emit("biggest_win_update", {
           biggestWinThisWeek: winAmount,
-        })
+        });
       }
     }
   } catch (error) {
-    console.error("Update biggest win error:", error)
-    throw error
+    console.error("Update biggest win error:", error);
+    throw error;
   }
-}
+};
 
 // Get user's bet history
 exports.getUserBets = async (req, res) => {
   try {
-    const userId = req.user.id
+    const userId = req.user.id;
 
     const bets = await Bet.find({ user: userId })
       .populate("question", "question outcome resolved")
       .sort({ createdAt: -1 })
-      .limit(20)
+      .limit(20);
 
     res.status(200).json({
       success: true,
       bets,
-    })
+    });
   } catch (error) {
-    console.error("Get user bets error:", error)
+    console.error("Get user bets error:", error);
     res.status(500).json({
       success: false,
       message: "Server error while fetching user bets",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    })
+    });
   }
-}
+};
 
 // Get active bet question
 exports.getActiveBetQuestion = async (req, res) => {
   try {
     // Get the current camera holder from the socket manager
-    const cameraHolder = socketManager.getCurrentCameraHolder()
-    
+    const cameraHolder = socketManager.getCurrentCameraHolder();
+
     // Only return a question if there's a valid camera holder
-    if (!cameraHolder || !cameraHolder.CameraHolderName || cameraHolder.CameraHolderName === "None") {
+    if (
+      !cameraHolder ||
+      !cameraHolder.CameraHolderName ||
+      cameraHolder.CameraHolderName === "None"
+    ) {
       return res.status(404).json({
         success: false,
         message: "No active camera holder available for betting",
-      })
+      });
     }
-    
+
     const activeQuestion = await BetQuestion.findOne({
       active: true,
       resolved: false,
       endTime: { $gt: new Date() },
-    })
+    });
 
     if (!activeQuestion) {
       // If no active question is found but we have a camera holder, create a new one
-      const subject = cameraHolder.CameraHolderName
+      const subject = cameraHolder.CameraHolderName;
       const conditions = [
-        "survive for 5 minutes",
-        "defeat the boss",
-        "reach the checkpoint",
-        "collect 10 coins",
-        "find the hidden treasure",
-      ]
+        "will X survive for next 20 Sec",
+        "Will X be able to get 2 Kill in 20 Sec",
+        "will X survive for next 30 Sec",
+        "Will X be able to get 3 Kill in 30 Sec",
+        "will X survive for next 40 Sec",
+        "Will X be able to get 5 Kill in 40 Sec",
+      ];
 
-      const randomCondition = conditions[Math.floor(Math.random() * conditions.length)]
-      const questionText = `Will ${subject} ${randomCondition}?`
-      const endTime = new Date(Date.now() + 36 * 1000) // 36 seconds from now (changed from 30)
+      const randomCondition =
+        conditions[Math.floor(Math.random() * conditions.length)];
+      const questionText = `Will ${subject} ${randomCondition}?`;
+      const endTime = new Date(Date.now() + 36 * 1000); // 36 seconds from now (changed from 30)
 
       const newQuestion = new BetQuestion({
         id: `question-${Date.now()}`,
@@ -2999,69 +3073,69 @@ exports.getActiveBetQuestion = async (req, res) => {
         noPercentage: 50,
         totalBetAmount: 0,
         totalPlayers: 0,
-      })
+      });
 
-      await newQuestion.save()
-      
+      await newQuestion.save();
+
       // Emit the new question to all clients
       if (io) {
         io.emit("new_question", {
           ...newQuestion.toObject(),
-          subject: subject
-        })
+          subject: subject,
+        });
       }
-      
+
       // Return the new question
       return res.status(200).json({
         success: true,
         question: {
           ...newQuestion.toObject(),
-          subject: subject
-        }
-      })
+          subject: subject,
+        },
+      });
     }
 
     // Update the response to include the current camera holder
     const questionResponse = {
       ...activeQuestion.toObject(),
-      subject: cameraHolder.CameraHolderName
-    }
+      subject: cameraHolder.CameraHolderName,
+    };
 
     res.status(200).json({
       success: true,
       question: questionResponse,
-    })
+    });
   } catch (error) {
-    console.error("Get active question error:", error)
+    console.error("Get active question error:", error);
     res.status(500).json({
       success: false,
       message: "Server error while fetching active question",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    })
+    });
   }
-}
+};
 
 // Get betting statistics - updated to include platform fees
 exports.getBetStats = async (req, res) => {
   try {
-    const now = new Date()
+    const now = new Date();
 
     // Try to find stats for current week
     let stats = await BetStats.findOne({
       weekStartDate: { $lte: now },
       weekEndDate: { $gte: now },
-    })
+    });
 
     // If no stats found, create default stats with zero values
     if (!stats) {
       // Calculate week start and end dates
-      const startOfWeek = new Date(now)
-      startOfWeek.setDate(now.getDate() - now.getDay())
-      startOfWeek.setHours(0, 0, 0, 0)
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - now.getDay());
+      startOfWeek.setHours(0, 0, 0, 0);
 
-      const endOfWeek = new Date(startOfWeek)
-      endOfWeek.setDate(startOfWeek.getDate() + 6)
-      endOfWeek.setHours(23, 59, 59, 999)
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+      endOfWeek.setHours(23, 59, 59, 999);
 
       stats = new BetStats({
         totalBetsAmount: 0, // Zero instead of sample data
@@ -3072,51 +3146,61 @@ exports.getBetStats = async (req, res) => {
         weekStartDate: startOfWeek,
         weekEndDate: endOfWeek,
         streamId: req.query.streamId || "default-stream",
-      })
+      });
 
-      await stats.save()
+      await stats.save();
     }
 
     // Get active players count (users who placed bets in the last 24 hours)
     const activePlayers = await Bet.distinct("user", {
       createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, // Last 24 hours
-    })
+    });
 
-    const activePlayersCount = activePlayers.length
-    stats.activePlayers = activePlayersCount
+    const activePlayersCount = activePlayers.length;
+    stats.activePlayers = activePlayersCount;
 
     // Get total unique players
-    const totalPlayers = await Bet.distinct("user")
-    stats.totalPlayers = totalPlayers.length
+    const totalPlayers = await Bet.distinct("user");
+    stats.totalPlayers = totalPlayers.length;
 
     // Get total bets amount (sum of all bet amounts)
-    const totalBetsAggregate = await Bet.aggregate([{ $group: { _id: null, total: { $sum: "$amount" } } }])
-    const totalBetsAmount = totalBetsAggregate.length > 0 ? totalBetsAggregate[0].total : 0
-    stats.totalBetsAmount = totalBetsAmount
+    const totalBetsAggregate = await Bet.aggregate([
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
+    const totalBetsAmount =
+      totalBetsAggregate.length > 0 ? totalBetsAggregate[0].total : 0;
+    stats.totalBetsAmount = totalBetsAmount;
 
     // Get total platform fees (sum of all platform fees)
     const totalFeesAggregate = await Transaction.aggregate([
       { $match: { type: "platform_fee" } },
       { $group: { _id: null, total: { $sum: { $abs: "$amount" } } } },
-    ])
-    const totalPlatformFees = totalFeesAggregate.length > 0 ? totalFeesAggregate[0].total : 0
-    stats.totalPlatformFees = totalPlatformFees
+    ]);
+    const totalPlatformFees =
+      totalFeesAggregate.length > 0 ? totalFeesAggregate[0].total : 0;
+    stats.totalPlatformFees = totalPlatformFees;
 
-    await stats.save()
+    await stats.save();
 
     // Emit updated stats via socket if available
     if (io) {
-      console.log("Emitting betting stats with biggestWinThisWeek:", stats.biggestWinThisWeek)
+      console.log(
+        "Emitting betting stats with biggestWinThisWeek:",
+        stats.biggestWinThisWeek
+      );
       io.emit("betting_stats", {
         totalBetsAmount: stats.totalBetsAmount,
         totalPlatformFees: stats.totalPlatformFees,
         biggestWinThisWeek: stats.biggestWinThisWeek,
         totalPlayers: stats.totalPlayers,
         activePlayers: stats.activePlayers,
-      })
+      });
     }
 
-    console.log("Sending betting stats with biggestWinThisWeek:", stats.biggestWinThisWeek)
+    console.log(
+      "Sending betting stats with biggestWinThisWeek:",
+      stats.biggestWinThisWeek
+    );
     res.status(200).json({
       success: true,
       stats: {
@@ -3126,9 +3210,9 @@ exports.getBetStats = async (req, res) => {
         totalPlayers: stats.totalPlayers,
         activePlayers: stats.activePlayers,
       },
-    })
+    });
   } catch (error) {
-    console.error("Get bet stats error:", error)
+    console.error("Get bet stats error:", error);
     // Return zero values even on error to ensure UI has something to display
     res.status(200).json({
       success: true,
@@ -3139,9 +3223,9 @@ exports.getBetStats = async (req, res) => {
         totalPlayers: 0,
         activePlayers: 0,
       },
-    })
+    });
   }
-}
+};
 
 // Add a debug endpoint to test the controller
 exports.debugController = async (req, res) => {
@@ -3150,7 +3234,8 @@ exports.debugController = async (req, res) => {
     const debugInfo = {
       nodeVersion: process.version,
       mongooseVersion: mongoose.version,
-      mongooseConnection: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+      mongooseConnection:
+        mongoose.connection.readyState === 1 ? "connected" : "disconnected",
       models: {
         betQuestion: !!mongoose.models.BetQuestion,
         bet: !!mongoose.models.Bet,
@@ -3161,37 +3246,37 @@ exports.debugController = async (req, res) => {
       socketIoAvailable: !!io,
       platformFeePercentage: "5%",
       cameraHolderAvailable: !!socketManager.getCurrentCameraHolder,
-      currentCameraHolder: socketManager.getCurrentCameraHolder()
-    }
+      currentCameraHolder: socketManager.getCurrentCameraHolder(),
+    };
 
     res.status(200).json({
       success: true,
       debugInfo,
-    })
+    });
   } catch (error) {
-    console.error("Debug controller error:", error)
+    console.error("Debug controller error:", error);
     res.status(500).json({
       success: false,
       message: "Server error in debug controller",
       error: error.message,
-    })
+    });
   }
-}
+};
 // Login hook to ensure user has 5000 balance
 exports.loginHook = async (req, res, next) => {
   try {
     if (req.user && req.user.id) {
-      const user = await ensureUserBalance(req.user.id)
+      const user = await ensureUserBalance(req.user.id);
       if (!user) {
-        console.error("User not found during login hook")
+        console.error("User not found during login hook");
       }
     }
-    next()
+    next();
   } catch (error) {
-    console.error("Login hook error:", error)
-    next()
+    console.error("Login hook error:", error);
+    next();
   }
-}
+};
 
 // Get platform fee statistics
 exports.getPlatformFeeStats = async (req, res) => {
@@ -3200,13 +3285,14 @@ exports.getPlatformFeeStats = async (req, res) => {
     const totalFeesAggregate = await Transaction.aggregate([
       { $match: { type: "platform_fee" } },
       { $group: { _id: null, total: { $sum: "$amount" } } },
-    ])
+    ]);
 
-    const totalFees = totalFeesAggregate.length > 0 ? Math.abs(totalFeesAggregate[0].total) : 0
+    const totalFees =
+      totalFeesAggregate.length > 0 ? Math.abs(totalFeesAggregate[0].total) : 0;
 
     // Get platform fees by day for the last 7 days
-    const sevenDaysAgo = new Date()
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
     const feesByDay = await Transaction.aggregate([
       {
@@ -3224,7 +3310,7 @@ exports.getPlatformFeeStats = async (req, res) => {
         },
       },
       { $sort: { _id: 1 } },
-    ])
+    ]);
 
     res.status(200).json({
       success: true,
@@ -3233,107 +3319,116 @@ exports.getPlatformFeeStats = async (req, res) => {
         feesByDay: feesByDay,
         platformFeePercentage: 5,
       },
-    })
+    });
   } catch (error) {
-    console.error("Get platform fee stats error:", error)
+    console.error("Get platform fee stats error:", error);
     res.status(500).json({
       success: false,
       message: "Server error while fetching platform fee statistics",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    })
+    });
   }
-}
+};
 
 // Add a new function to handle camera holder changes
 exports.handleCameraHolderChange = async (req, res) => {
   try {
-    const { previousHolder, newHolder } = req.body
-    
-    console.log(`Camera holder changed from ${previousHolder} to ${newHolder}`)
-    
+    const { previousHolder, newHolder } = req.body;
+
+    console.log(`Camera holder changed from ${previousHolder} to ${newHolder}`);
+
     // If the camera holder changed to None or empty, resolve all active questions with "No" outcome
     if (!newHolder || newHolder === "None") {
       // Find all active questions
       const activeQuestions = await BetQuestion.find({
         active: true,
         resolved: false,
-      })
-      
+      });
+
       // Resolve each question
       for (const question of activeQuestions) {
-        question.resolved = true
-        question.outcome = "No" // Player died or left, so outcome is No
-        question.active = false
-        question.resolvedReason = "Camera holder died or changed"
-        await question.save()
-        
+        question.resolved = true;
+        question.outcome = "No"; // Player died or left, so outcome is No
+        question.active = false;
+        question.resolvedReason = "Camera holder died or changed";
+        await question.save();
+
         // Process all bets for this question
-        await processBetsForQuestion(question._id, "No")
-        
+        await processBetsForQuestion(question._id, "No");
+
         // Emit socket event for question resolution
         if (io) {
           io.emit("questionResolved", {
             questionId: question._id,
             outcome: "No",
             reason: "Camera holder died or changed",
-          })
+          });
         }
       }
     }
-    
+
     // Update the camera holder in the socket manager if available
-    if (socketManager && typeof socketManager.updateCameraHolder === 'function') {
+    if (
+      socketManager &&
+      typeof socketManager.updateCameraHolder === "function"
+    ) {
       socketManager.updateCameraHolder({
-        CameraHolderName: newHolder || "None"
-      })
+        CameraHolderName: newHolder || "None",
+      });
     }
-    
+
     res.status(200).json({
       success: true,
       message: "Camera holder change processed successfully",
       previousHolder,
       newHolder,
-    })
+    });
   } catch (error) {
-    console.error("Handle camera holder change error:", error)
+    console.error("Handle camera holder change error:", error);
     res.status(500).json({
       success: false,
       message: "Server error while handling camera holder change",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    })
+    });
   }
-}
+};
 
 // Create a new bet question with 36-second timer
 exports.createBetQuestion = async (req, res) => {
   try {
-    const { streamId } = req.body || { streamId: "default-stream" }
-    
+    const { streamId } = req.body || { streamId: "default-stream" };
+
     // Get the current camera holder
-    const cameraHolder = socketManager.getCurrentCameraHolder()
-    
+    const cameraHolder = socketManager.getCurrentCameraHolder();
+
     // Only create a question if there's a valid camera holder
-    if (!cameraHolder || !cameraHolder.CameraHolderName || cameraHolder.CameraHolderName === "None") {
+    if (
+      !cameraHolder ||
+      !cameraHolder.CameraHolderName ||
+      cameraHolder.CameraHolderName === "None"
+    ) {
       return res.status(400).json({
         success: false,
         message: "No active camera holder available for betting",
-      })
+      });
     }
-    
-    const subject = cameraHolder.CameraHolderName
-    const conditions = [
-      "survive for 5 minutes",
-      "defeat the boss",
-      "reach the checkpoint",
-      "collect 10 coins",
-      "find the hidden treasure",
-    ]
 
-    const randomCondition = conditions[Math.floor(Math.random() * conditions.length)]
-    const questionText = `Will ${subject} ${randomCondition}?`
-    
+    const subject = cameraHolder.CameraHolderName;
+    const conditions = [
+      "will X survive for next 20 Sec",
+      "Will X be able to get 2 Kill in 20 Sec",
+      "will X survive for next 30 Sec",
+      "Will X be able to get 3 Kill in 30 Sec",
+      "will X survive for next 40 Sec",
+      "Will X be able to get 5 Kill in 40 Sec",
+    ];
+
+    const randomCondition =
+      conditions[Math.floor(Math.random() * conditions.length)];
+    const questionText = `Will ${subject} ${randomCondition}?`;
+
     // Set end time to 36 seconds from now (changed from 30)
-    const endTime = new Date(Date.now() + 36 * 1000)
+    const endTime = new Date(Date.now() + 36 * 1000);
 
     const newQuestion = new BetQuestion({
       id: `question-${Date.now()}`,
@@ -3350,59 +3445,66 @@ exports.createBetQuestion = async (req, res) => {
       noPercentage: 50,
       totalBetAmount: 0,
       totalPlayers: 0,
-    })
+    });
 
-    await newQuestion.save()
-    
+    await newQuestion.save();
+
     // Emit the new question to all clients
     if (io) {
       io.emit("new_question", {
         ...newQuestion.toObject(),
-        subject: subject
-      })
+        subject: subject,
+      });
     }
-    
+
     res.status(201).json({
       success: true,
-      question: newQuestion
-    })
+      question: newQuestion,
+    });
   } catch (error) {
-    console.error("Create bet question error:", error)
+    console.error("Create bet question error:", error);
     res.status(500).json({
       success: false,
       message: "Server error while creating bet question",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    })
+    });
   }
-}
+};
 
 exports.placeBetWithPartialPayment = async (req, res) => {
   try {
-    console.log("=== PLACE BET WITH PARTIAL PAYMENT START ===")
-    const { questionId, choice, amount, streamId, paymentAmount } = req.body
+    console.log("=== PLACE BET WITH PARTIAL PAYMENT START ===");
+    const { questionId, choice, amount, streamId, paymentAmount } = req.body;
 
     // Add more robust user ID extraction with fallbacks
-    let userId
+    let userId;
     if (req.user) {
-      userId = req.user.id || req.user._id || req.user.userId
-      console.log("Using user ID from token:", userId)
+      userId = req.user.id || req.user._id || req.user.userId;
+      console.log("Using user ID from token:", userId);
     }
 
     if (!userId) {
       return res.status(400).json({
         success: false,
         message: "User ID not found in request",
-      })
+      });
     }
 
-    console.log("Received bet request:", { questionId, choice, amount, streamId, userId, paymentAmount })
+    console.log("Received bet request:", {
+      questionId,
+      choice,
+      amount,
+      streamId,
+      userId,
+      paymentAmount,
+    });
 
     // Validate bet amount
     if (!amount || amount <= 0) {
       return res.status(400).json({
         success: false,
         message: "Invalid bet amount",
-      })
+      });
     }
 
     // Validate payment amount
@@ -3410,7 +3512,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Invalid payment amount",
-      })
+      });
     }
 
     // Validate streamId
@@ -3418,37 +3520,43 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Stream ID is required",
-      })
+      });
     }
 
     // Find user with actual balance
-    console.log("Finding user with ID:", userId)
-    const user = await User.findById(userId)
+    console.log("Finding user with ID:", userId);
+    const user = await User.findById(userId);
 
     if (!user) {
-      console.log("User not found with ID:", userId)
+      console.log("User not found with ID:", userId);
       return res.status(404).json({
         success: false,
         message: "User not found",
-      })
+      });
     }
-    console.log("Found user:", user.username || user.email || userId)
-    console.log("Current wallet balance:", user.walletBalance || 0)
+    console.log("Found user:", user.username || user.email || userId);
+    console.log("Current wallet balance:", user.walletBalance || 0);
 
     // Calculate how much should be deducted from wallet vs. payment
-    const walletBalance = user.walletBalance || 0
-    const totalBetAmount = Number(amount)
+    const walletBalance = user.walletBalance || 0;
+    const totalBetAmount = Number(amount);
 
     // Calculate how much to take from wallet and how much from payment
-    const walletDeduction = Math.min(walletBalance, totalBetAmount)
-    const paymentNeeded = totalBetAmount - walletDeduction
+    const walletDeduction = Math.min(walletBalance, totalBetAmount);
+    const paymentNeeded = totalBetAmount - walletDeduction;
 
-    console.log(`Wallet balance: ${walletBalance}, Total bet: ${totalBetAmount}`)
-    console.log(`Will deduct ${walletDeduction} from wallet and ${paymentNeeded} from payment`)
+    console.log(
+      `Wallet balance: ${walletBalance}, Total bet: ${totalBetAmount}`
+    );
+    console.log(
+      `Will deduct ${walletDeduction} from wallet and ${paymentNeeded} from payment`
+    );
 
     // Verify the payment amount is sufficient
     if (paymentAmount < paymentNeeded) {
-      console.log(`Insufficient payment amount. Needed: ${paymentNeeded}, Provided: ${paymentAmount}`)
+      console.log(
+        `Insufficient payment amount. Needed: ${paymentNeeded}, Provided: ${paymentAmount}`
+      );
       return res.status(400).json({
         success: false,
         message: "Insufficient payment amount",
@@ -3456,27 +3564,32 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         currentBalance: walletBalance,
         amountNeeded: paymentNeeded,
         paymentProvided: paymentAmount,
-      })
+      });
     }
 
     // Find the question - handle both ObjectId and string ID formats
-    let question = null
+    let question = null;
     try {
-      console.log("Looking for question with ID:", questionId, "Type:", typeof questionId)
+      console.log(
+        "Looking for question with ID:",
+        questionId,
+        "Type:",
+        typeof questionId
+      );
 
       // Try to find by ObjectId first if it's a valid ObjectId
       if (mongoose.Types.ObjectId.isValid(questionId)) {
-        question = await BetQuestion.findById(questionId)
-        console.log("Searched by ObjectId, found:", question ? "Yes" : "No")
+        question = await BetQuestion.findById(questionId);
+        console.log("Searched by ObjectId, found:", question ? "Yes" : "No");
       }
 
       // If not found, try to find by string ID
       if (!question) {
         try {
-          question = await BetQuestion.findOne({ id: questionId })
-          console.log("Searched by string ID:", question ? "Yes" : "No")
+          question = await BetQuestion.findOne({ id: questionId });
+          console.log("Searched by string ID:", question ? "Yes" : "No");
         } catch (err) {
-          console.log("Error searching by string ID:", err.message)
+          console.log("Error searching by string ID:", err.message);
         }
       }
 
@@ -3485,16 +3598,18 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         try {
           question = await BetQuestion.findOne({
             question: { $regex: questionId.replace("question-", "") },
-          })
-          console.log("Searched by regex, found:", question ? "Yes" : "No")
+          });
+          console.log("Searched by regex, found:", question ? "Yes" : "No");
         } catch (err) {
-          console.log("Error searching by regex:", err.message)
+          console.log("Error searching by regex:", err.message);
         }
       }
 
       // If still not found, get the most recent active question
       if (!question) {
-        console.log("No question found with ID, getting most recent active question")
+        console.log(
+          "No question found with ID, getting most recent active question"
+        );
         try {
           const activeQuestions = await BetQuestion.find({
             active: true,
@@ -3502,45 +3617,54 @@ exports.placeBetWithPartialPayment = async (req, res) => {
             endTime: { $gt: new Date() },
           })
             .sort({ createdAt: -1 })
-            .limit(1)
+            .limit(1);
 
           if (activeQuestions.length > 0) {
-            question = activeQuestions[0]
-            console.log("Using most recent active question as fallback:", question._id)
+            question = activeQuestions[0];
+            console.log(
+              "Using most recent active question as fallback:",
+              question._id
+            );
           }
         } catch (fallbackError) {
-          console.error("Error finding active questions:", fallbackError)
+          console.error("Error finding active questions:", fallbackError);
         }
       }
 
       // If still no question found, create a new one
       if (!question) {
-        console.log("No active questions found, creating a new one")
+        console.log("No active questions found, creating a new one");
         try {
           // Get the current camera holder from the socket manager
-          const cameraHolder = socketManager.getCurrentCameraHolder()
-          
+          const cameraHolder = socketManager.getCurrentCameraHolder();
+
           // Only create a question if there's a valid camera holder
-          if (!cameraHolder || !cameraHolder.CameraHolderName || cameraHolder.CameraHolderName === "None") {
+          if (
+            !cameraHolder ||
+            !cameraHolder.CameraHolderName ||
+            cameraHolder.CameraHolderName === "None"
+          ) {
             return res.status(400).json({
               success: false,
               message: "No active camera holder available for betting",
-            })
+            });
           }
-          
-          const subject = cameraHolder.CameraHolderName || "Player"
-          
-          const conditions = [
-            "survive for 5 minutes",
-            "defeat the boss",
-            "reach the checkpoint",
-            "collect 10 coins",
-            "find the hidden treasure",
-          ]
 
-          const randomCondition = conditions[Math.floor(Math.random() * conditions.length)]
-          const questionText = `Will ${subject} ${randomCondition}?`
-          const endTime = new Date(Date.now() + 36 * 1000) // 36 seconds from now (changed from 30)
+          const subject = cameraHolder.CameraHolderName || "Player";
+
+          const conditions = [
+            "will X survive for next 20 Sec",
+            "Will X be able to get 2 Kill in 20 Sec",
+            "will X survive for next 30 Sec",
+            "Will X be able to get 3 Kill in 30 Sec",
+            "will X survive for next 40 Sec",
+            "Will X be able to get 5 Kill in 40 Sec",
+          ];
+
+          const randomCondition =
+            conditions[Math.floor(Math.random() * conditions.length)];
+          const questionText = `Will ${subject} ${randomCondition}?`;
+          const endTime = new Date(Date.now() + 36 * 1000); // 36 seconds from now (changed from 30)
 
           question = new BetQuestion({
             id: `question-${Date.now()}`,
@@ -3557,36 +3681,42 @@ exports.placeBetWithPartialPayment = async (req, res) => {
             noPercentage: 50,
             totalBetAmount: 0,
             totalPlayers: 0,
-          })
+          });
 
-          await question.save()
-          console.log("Created new question on demand:", question._id)
+          await question.save();
+          console.log("Created new question on demand:", question._id);
         } catch (createError) {
-          console.error("Error creating new question:", createError)
-          throw createError // Re-throw to be caught by the outer try/catch
+          console.error("Error creating new question:", createError);
+          throw createError; // Re-throw to be caught by the outer try/catch
         }
       }
     } catch (error) {
-      console.error("Error finding/creating question:", error)
+      console.error("Error finding/creating question:", error);
       return res.status(404).json({
         success: false,
         message: "Bet question not found and could not create a new one",
         error: error.message,
-      })
+      });
     }
 
     if (!question) {
       // Create a debug endpoint to check what questions exist
-      const allQuestions = await BetQuestion.find().sort({ createdAt: -1 }).limit(5)
+      const allQuestions = await BetQuestion.find()
+        .sort({ createdAt: -1 })
+        .limit(5);
       console.error(
         "No question found. Recent questions:",
-        allQuestions.map((q) => ({ id: q._id, active: q.active, resolved: q.resolved })),
-      )
+        allQuestions.map((q) => ({
+          id: q._id,
+          active: q.active,
+          resolved: q.resolved,
+        }))
+      );
 
       return res.status(404).json({
         success: false,
         message: "Bet question not found. Please refresh and try again.",
-      })
+      });
     }
 
     // Check if question is still active
@@ -3594,7 +3724,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "This betting round has ended",
-      })
+      });
     }
 
     // Check if countdown has expired
@@ -3602,45 +3732,52 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Betting time has expired for this question",
-      })
+      });
     }
 
     // Calculate platform fee (5% of bet amount)
-    const platformFeePercentage = 0.05
-    const platformFee = Math.round(amount * platformFeePercentage)
-    const betAmountAfterFee = amount - platformFee
+    const platformFeePercentage = 0.05;
+    const platformFee = Math.round(amount * platformFeePercentage);
+    const betAmountAfterFee = amount - platformFee;
 
-    console.log(`Calculating platform fee: ${platformFee} (${platformFeePercentage * 100}% of ${amount})`)
-    console.log(`Bet amount after fee: ${betAmountAfterFee}`)
+    console.log(
+      `Calculating platform fee: ${platformFee} (${platformFeePercentage * 100}% of ${amount})`
+    );
+    console.log(`Bet amount after fee: ${betAmountAfterFee}`);
 
     // Create the bet with the amount after fee
-    console.log("Creating new bet")
+    console.log("Creating new bet");
     const bet = new Bet({
       user: userId,
       question: question._id,
       choice,
-      amount: betAmountAfterFee, 
-      originalAmount: amount, 
-      platformFee: platformFee, 
+      amount: betAmountAfterFee,
+      originalAmount: amount,
+      platformFee: platformFee,
       status: "pending",
       timestamp: new Date(),
       streamId: streamId,
       matchedAmount: 0,
       potentialPayout: 0,
       processed: false,
-    })
+    });
 
     // Store the previous balance for response
-    const previousBalance = user.walletBalance || 0
+    const previousBalance = user.walletBalance || 0;
 
     // Update user's wallet balance - only deduct the wallet portion
-    console.log("Updating user wallet balance from", previousBalance, "to", previousBalance - walletDeduction)
-    user.walletBalance = previousBalance - walletDeduction
-    user.totalBets = (user.totalBets || 0) + 1
-    await user.save()
+    console.log(
+      "Updating user wallet balance from",
+      previousBalance,
+      "to",
+      previousBalance - walletDeduction
+    );
+    user.walletBalance = previousBalance - walletDeduction;
+    user.totalBets = (user.totalBets || 0) + 1;
+    await user.save();
 
     // Create transaction record for the bet
-    console.log("Creating bet transaction record")
+    console.log("Creating bet transaction record");
     const betTransaction = new Transaction({
       user: userId,
       type: "bet_place",
@@ -3648,11 +3785,11 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       bet: bet._id,
       question: question._id,
       balanceAfter: user.walletBalance + platformFee, // Temporary balance after just the bet
-    })
-    await betTransaction.save()
+    });
+    await betTransaction.save();
 
     // Create transaction record for the platform fee
-    console.log("Creating platform fee transaction record")
+    console.log("Creating platform fee transaction record");
     const feeTransaction = new Transaction({
       user: userId,
       type: "platform_fee",
@@ -3660,12 +3797,12 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       bet: bet._id,
       question: question._id,
       balanceAfter: user.walletBalance, // Final balance after both bet and fee
-    })
-    await feeTransaction.save()
+    });
+    await feeTransaction.save();
 
     // Create transaction record for the payment portion
     if (paymentNeeded > 0) {
-      console.log("Creating payment transaction record")
+      console.log("Creating payment transaction record");
       const paymentTransaction = new Transaction({
         user: userId,
         type: "payment_for_bet",
@@ -3673,125 +3810,139 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         bet: bet._id,
         question: question._id,
         balanceAfter: user.walletBalance,
-      })
-      await paymentTransaction.save()
+      });
+      await paymentTransaction.save();
     }
 
     // Update question stats with the bet amount after fee
-    console.log("Updating question stats")
+    console.log("Updating question stats");
     if (choice === "Yes") {
-      question.yesBetAmount = (question.yesBetAmount || 0) + betAmountAfterFee
+      question.yesBetAmount = (question.yesBetAmount || 0) + betAmountAfterFee;
       // Check if this user has already bet on this question with this choice
       const existingYesBet = await Bet.findOne({
         user: userId,
         question: question._id,
         choice: "Yes",
         _id: { $ne: bet._id }, // Exclude the current bet
-      })
+      });
 
       if (!existingYesBet) {
         // Only increment if this is the first bet from this user for this choice
-        question.yesUserCount = (question.yesUserCount || 0) + 1
+        question.yesUserCount = (question.yesUserCount || 0) + 1;
       }
     } else {
-      question.noBetAmount = (question.noBetAmount || 0) + betAmountAfterFee
+      question.noBetAmount = (question.noBetAmount || 0) + betAmountAfterFee;
       // Check if this user has already bet on this question with this choice
       const existingNoBet = await Bet.findOne({
         user: userId,
         question: question._id,
         choice: "No",
         _id: { $ne: bet._id }, // Exclude the current bet
-      })
+      });
 
       if (!existingNoBet) {
         // Only increment if this is the first bet from this user for this choice
-        question.noUserCount = (question.noUserCount || 0) + 1
+        question.noUserCount = (question.noUserCount || 0) + 1;
       }
     }
 
-    question.totalBetAmount = (question.totalBetAmount || 0) + betAmountAfterFee
+    question.totalBetAmount =
+      (question.totalBetAmount || 0) + betAmountAfterFee;
 
     // Check if this user has already bet on this question (regardless of choice)
     const existingBet = await Bet.findOne({
       user: userId,
       question: question._id,
       _id: { $ne: bet._id }, // Exclude the current bet
-    })
+    });
 
     if (!existingBet) {
       // Only increment if this is the first bet from this user on this question
-      question.totalPlayers = (question.totalPlayers || 0) + 1
+      question.totalPlayers = (question.totalPlayers || 0) + 1;
     }
 
-    question.totalPlatformFees = (question.totalPlatformFees || 0) + platformFee
+    question.totalPlatformFees =
+      (question.totalPlatformFees || 0) + platformFee;
 
     // Recalculate percentages based on user counts instead of bet amounts
-    const totalUsers = (question.yesUserCount || 0) + (question.noUserCount || 0)
+    const totalUsers =
+      (question.yesUserCount || 0) + (question.noUserCount || 0);
     if (totalUsers > 0) {
-      question.yesPercentage = Math.round(((question.yesUserCount || 0) / totalUsers) * 100)
-      question.noPercentage = Math.round(((question.noUserCount || 0) / totalUsers) * 100)
+      question.yesPercentage = Math.round(
+        ((question.yesUserCount || 0) / totalUsers) * 100
+      );
+      question.noPercentage = Math.round(
+        ((question.noUserCount || 0) / totalUsers) * 100
+      );
 
       // Ensure percentages add up to 100%
       if (question.yesPercentage + question.noPercentage !== 100) {
         // Adjust the larger percentage to make the sum 100
         if (question.yesPercentage > question.noPercentage) {
-          question.yesPercentage = 100 - question.noPercentage
+          question.yesPercentage = 100 - question.noPercentage;
         } else {
-          question.noPercentage = 100 - question.yesPercentage
+          question.noPercentage = 100 - question.yesPercentage;
         }
       }
     } else {
       // Default to 50/50 if no users have bet yet
-      question.yesPercentage = 50
-      question.noPercentage = 50
+      question.yesPercentage = 50;
+      question.noPercentage = 50;
     }
 
-    await question.save()
+    await question.save();
 
     // Calculate potential payout based on current odds
-    console.log("Calculating potential payout")
+    console.log("Calculating potential payout");
     const odds =
-      choice === "Yes" ? question.noPercentage / question.yesPercentage : question.yesPercentage / question.noPercentage
+      choice === "Yes"
+        ? question.noPercentage / question.yesPercentage
+        : question.yesPercentage / question.noPercentage;
 
     // Calculate potential winnings with 5% platform fee
     // Formula: payout = bet * 2 * 0.95
-    const platformFeePercentageOnWinnings = 0.05
-    const grossPotentialWinnings = betAmountAfterFee * odds
-    const platformFeeOnWinnings = (betAmountAfterFee + grossPotentialWinnings) * platformFeePercentageOnWinnings
-    const potentialPayout = betAmountAfterFee + grossPotentialWinnings - platformFeeOnWinnings
+    const platformFeePercentageOnWinnings = 0.05;
+    const grossPotentialWinnings = betAmountAfterFee * odds;
+    const platformFeeOnWinnings =
+      (betAmountAfterFee + grossPotentialWinnings) *
+      platformFeePercentageOnWinnings;
+    const potentialPayout =
+      betAmountAfterFee + grossPotentialWinnings - platformFeeOnWinnings;
 
-    console.log(`Potential payout calculation:`)
-    console.log(`- Bet amount after initial fee: ${betAmountAfterFee}`)
-    console.log(`- Odds: ${odds}`)
-    console.log(`- Gross potential winnings: ${grossPotentialWinnings}`)
-    console.log(`- Platform fee (${platformFeePercentageOnWinnings * 100}%): ${platformFeeOnWinnings}`)
-    console.log(`- Net potential payout: ${potentialPayout}`)
+    console.log(`Potential payout calculation:`);
+    console.log(`- Bet amount after initial fee: ${betAmountAfterFee}`);
+    console.log(`- Odds: ${odds}`);
+    console.log(`- Gross potential winnings: ${grossPotentialWinnings}`);
+    console.log(
+      `- Platform fee (${platformFeePercentageOnWinnings * 100}%): ${platformFeeOnWinnings}`
+    );
+    console.log(`- Net potential payout: ${potentialPayout}`);
 
-    bet.potentialPayout = potentialPayout
-    bet.grossPotentialPayout = betAmountAfterFee + grossPotentialWinnings
-    bet.platformFeeOnWinnings = platformFeeOnWinnings
-    await bet.save()
+    bet.potentialPayout = potentialPayout;
+    bet.grossPotentialPayout = betAmountAfterFee + grossPotentialWinnings;
+    bet.platformFeeOnWinnings = platformFeeOnWinnings;
+    await bet.save();
 
     // Try to match the bet
-    console.log("Matching bet")
+    console.log("Matching bet");
     try {
-      await matchBet(bet, question)
+      await matchBet(bet, question);
     } catch (matchError) {
-      console.error("Error matching bet:", matchError)
+      console.error("Error matching bet:", matchError);
       // Continue even if matching fails
     }
 
     // Update global stats
-    console.log("Updating global stats")
+    console.log("Updating global stats");
     try {
-      await updateBetStats(betAmountAfterFee, platformFee)
+      await updateBetStats(betAmountAfterFee, platformFee);
     } catch (statsError) {
-      console.error("Error updating stats:", statsError)
+      console.error("Error updating stats:", statsError);
       // Continue even if stats update fails
     }
 
     // Emit socket events for real-time updates
-    console.log("Emitting socket events")
+    console.log("Emitting socket events");
     if (io) {
       // Emit bet placed event with updated question data
       io.emit("betPlaced", {
@@ -3801,16 +3952,16 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         totalBetAmount: question.totalBetAmount,
         totalPlayers: question.totalPlayers,
         newPlayer: true, // Indicate this is a new player
-      })
+      });
 
       // Also emit specific stats updates
       io.emit("total_bets_update", {
         amount: question.totalBetAmount,
-      })
+      });
 
       io.emit("player_count_update", {
         count: question.totalPlayers,
-      })
+      });
 
       // Emit comprehensive betting stats
       io.emit("betting_stats", {
@@ -3819,7 +3970,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         totalPlayers: question.totalPlayers,
         activePlayers: question.totalPlayers, // Simplification
         totalPlatformFees: question.totalPlatformFees || 0,
-      })
+      });
 
       // IMPORTANT: Emit wallet update event with real-time balance
       io.emit("wallet_update", {
@@ -3829,7 +3980,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         change: -walletDeduction, // Only report the wallet deduction as the change
         platformFee: platformFee,
         paymentAmount: paymentNeeded, // Include the payment amount
-      })
+      });
 
       // Add a specific bet_response event for immediate UI updates
       io.emit("bet_response", {
@@ -3840,14 +3991,14 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         platformFee: platformFee,
         userId: userId,
         paymentAmount: paymentNeeded, // Include the payment amount
-      })
+      });
     }
 
-    console.log("Bet placed successfully")
-    console.log("New balance:", user.walletBalance)
-    console.log("Previous balance:", previousBalance)
-    console.log("Wallet deduction:", walletDeduction)
-    console.log("Payment amount:", paymentNeeded)
+    console.log("Bet placed successfully");
+    console.log("New balance:", user.walletBalance);
+    console.log("Previous balance:", previousBalance);
+    console.log("Wallet deduction:", walletDeduction);
+    console.log("Payment amount:", paymentNeeded);
 
     res.status(201).json({
       success: true,
@@ -3868,11 +4019,11 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         totalBetAmount: question.totalBetAmount,
         totalPlayers: question.totalPlayers,
       },
-    })
-    console.log("=== PLACE BET WITH PARTIAL PAYMENT END ===")
+    });
+    console.log("=== PLACE BET WITH PARTIAL PAYMENT END ===");
   } catch (error) {
-    console.error("Place bet error:", error)
-    console.error("Error stack:", error.stack)
+    console.error("Place bet error:", error);
+    console.error("Error stack:", error.stack);
 
     // Check for specific error types
     if (error.name === "CastError") {
@@ -3880,7 +4031,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         success: false,
         message: "Invalid ID format",
         error: error.message,
-      })
+      });
     }
 
     if (error.name === "ValidationError") {
@@ -3888,7 +4039,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         success: false,
         message: "Validation error",
         error: error.message,
-      })
+      });
     }
 
     // Generic error response
@@ -3896,8 +4047,8 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       success: false,
       message: "Server error while placing bet",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    })
+    });
   }
-}
+};
 
-module.exports = exports
+module.exports = exports;
