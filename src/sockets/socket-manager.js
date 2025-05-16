@@ -51,17 +51,14 @@ const generateRandomQuestion = async () => {
     ) {
       throw new Error("No valid camera holder data found");
     }
-
     // Use the camera holder name as the subject
     const subject = currentCameraHolder.CameraHolderName;
+    // let totalTime = 30
 
     const conditions = [
-      "will X survive for next 20 Sec",
-      "Will X be able to get 2 Kill in 20 Sec",
-      "will X survive for next 30 Sec",
-      "Will X be able to get 3 Kill in 30 Sec",
-      "will X survive for next 40 Sec",
-      "Will X be able to get 5 Kill in 40 Sec",
+      "Will  be able to get  5 Kill in 30 sec",
+      "Will  be able to get 3 Kill in 35 Sec",
+      "Will  be able to get 5 Kill in 40 Sec",
     ];
 
     const randomCondition =
@@ -120,8 +117,26 @@ async function generateNewQuestion(specificStreamId = null) {
     // Get the dynamic question with camera holder name as subject
     const { subject, condition } = await generateRandomQuestion();
     const questionText = `Will ${subject} ${condition}?`;
+
+
+   let match = questionText.match(/(\d+)\s*Sec/i);
+ let competitionTime;
+if (match) {
+  console.log("match------------------------------", match[1]); // "35"
+   competitionTime = 36 + Number(match[1])||0;
+      console.log("compitationTime------------------------------", competitionTime)
+
+} else {
+  console.log("No number found before 'Sec'");
+}
+
+
+
+    console.log("question Text-----------------------------------------------------------------------", questionText)
     const now = new Date();
     const endTime = new Date(now.getTime() + 36000); // 36 seconds countdown
+
+
 
     // Use provided streamId or default
     const streamId = specificStreamId || "default-stream";
@@ -139,7 +154,7 @@ async function generateNewQuestion(specificStreamId = null) {
       totalBetAmount: 0,
       totalPlayers: 0,
       hasBets: false,
-      streamId: streamId, // Add the streamId
+      streamId: streamId, 
     });
 
     await newQuestion.save();
@@ -152,6 +167,7 @@ async function generateNewQuestion(specificStreamId = null) {
       condition,
       startTime: now,
       endTime,
+      competitionTime,
       yesPercentage: 50,
       noPercentage: 50,
       totalBetAmount: 0,
@@ -234,7 +250,8 @@ async function resolveQuestion(questionId) {
       questionTimers.delete(questionId.toString());
     }
   } catch (error) {
-    console.error("Error resolving question:", error);
+    
+    
   }
 }
 

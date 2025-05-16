@@ -15,7 +15,6 @@ exports.createPlayer = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
-
 // Get all players
 exports.getPlayers = async (req, res) => {
   try {
@@ -25,6 +24,7 @@ exports.getPlayers = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
 
 // Update a player by ID
 exports.updatePlayer = async (req, res) => {
@@ -86,11 +86,14 @@ exports.updatePlayer = async (req, res) => {
 
 // Add a kill to the current camera holder
 exports.addKillToHolder = async (req, res) => {
+
+  
   try {
     // Find the current camera holder
     const currentHolder = await Player.findOne({ 
       CameraHolderName: { $ne: "None" } 
     });
+
 
     if (!currentHolder) {
       return res.status(404).json({ message: "No active camera holder found" });
