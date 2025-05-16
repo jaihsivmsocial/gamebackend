@@ -127,6 +127,8 @@ const qualitySettingsRoutes = require("./src/routes/quality-routes.js")
 const playerRoutes = require("./src/routes/betroute/player-route.js");
 const paymentRoutes = require("./src/routes/paymentRoute/payment-routes.js")
 const webhookRoutes = require("./src/routes/paymentRoute/webhookRoutes")
+require("./src/controller/CronJob/CheckAnswers.js");
+
 // Load environment variables
 dotenv.config()
 
