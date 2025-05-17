@@ -2,12 +2,13 @@ const express = require("express")
 const {
   register,
   login,
+    verifyAuth,
   checkUsername,
-
   forgotPassword,
 
   requestOtpReset,
   verifyOtpAndResetPassword,
+
 } = require("../controller/authController")
 const authMiddleware = require("../middleware/authMiddleware")
 const router = express.Router()
@@ -20,6 +21,7 @@ router.get("/1/:username", checkUsername)
 router.post("/forgot-password", forgotPassword)
 router.post("/request-otp-reset", requestOtpReset)
 router.post("/verify-otp-reset", verifyOtpAndResetPassword)
+router.post("./verify-auth",  verifyAuth)
 
 // router.post("/playfab-password-reset", handlePlayFabCloudScript)
 

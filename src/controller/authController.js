@@ -8,102 +8,179 @@ const {sendOtpEmail}= require('../utils/email')
 
 exports.register = async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const { username, email, password } = req.body
+
+    // Standardize username to lowercase for consistent storage and lookup
+    const standardizedUsername = username.toLowerCase()
 
     // Check if user already exists (by username or email)
-    const existingUser = await User.findOne({ $or: [{ email }, { username }] });
+    const existingUser = await User.findOne({
+      $or: [{ email }, { username: standardizedUsername }],
+    })
+
     if (existingUser) {
-      return res.status(400).json({ message: "User already exists" });
+      return res.status(400).json({ message: "User already exists" })
     }
 
     // Hash the password before saving
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const salt = await bcrypt.genSalt(10)
+    const hashedPassword = await bcrypt.hash(password, salt)
 
-    // Create new user with hashed password
+    // Create new user with standardized username and hashed password
     const user = new User({
-      username,
+      username: standardizedUsername, // Store lowercase username for consistent lookup
       email,
-      password: hashedPassword, // Store hashed password
-    });
+      password: hashedPassword,
+      displayName: username, // Optionally store original case as displayName for display purposes
+    })
 
-    await user.save();
+    await user.save()
 
-    // Generate JWT token
-    // const token = jwt.sign(
-    //   { id: user._id, username: user.username },
-    //   process.env.JWT_SECRET,
-    //   { expiresIn: "7d" }
-    // );
+    // Generate JWT token for immediate login if desired
+    const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: "7d" })
 
     res.status(201).json({
       message: "User registered successfully",
+      token, // Include token in response
       user: {
         id: user._id,
         username: user.username,
         email: user.email,
         profilePicture: user.profilePicture,
       },
-    });
+    })
   } catch (error) {
-    console.error("Registration error:", error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Registration error:", error)
+    res.status(500).json({ message: "Server error" })
   }
-};
+}
+
 exports.login = async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const { username, password } = req.body
 
     // Validate request body
     if (!username || !password) {
-      return res.status(400).json({ error: "Username and password are required" });
+      return res.status(400).json({ error: "Username and password are required" })
     }
 
     // Check if JWT_SECRET is set
     if (!process.env.JWT_SECRET) {
-      return res.status(500).json({ error: "JWT_SECRET is missing in environment variables" });
+      return res.status(500).json({ error: "JWT_SECRET is missing in environment variables" })
     }
 
     // Convert username to lowercase for case-insensitive login
-    const user = await User.findOne({ username: username.toLowerCase() });
+    // This matches how we store usernames in the register function
+    const user = await User.findOne({ username: username.toLowerCase() })
 
     if (!user) {
-      return res.status(400).json({ error: "Invalid credentials" });
+      return res.status(400).json({ error: "Invalid credentials" })
     }
 
     // Ensure user.password exists
     if (!user.password) {
-      return res.status(500).json({ error: "User password not set in database" });
+      return res.status(500).json({ error: "User password not set in database" })
     }
 
     // Compare passwords
-    const isMatch = await bcrypt.compare(password, user.password);
+    const isMatch = await bcrypt.compare(password, user.password)
     if (!isMatch) {
-      return res.status(400).json({ error: "Invalid credentials" });
+      return res.status(400).json({ error: "Invalid credentials" })
     }
 
+    // Generate token with consistent payload structure
     const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, {
-      expiresIn: "24h",
-    });
+      expiresIn: "24h", // Longer expiration for better user experience
+    })
 
+    // Set both cookie and return token in response for maximum compatibility
     const cookieData = {
       token: token,
       username: user.username,
-    };
+    }
 
+    // Set HTTP-only cookie for secure browser storage
     res.cookie("authData", JSON.stringify(cookieData), {
       httpOnly: true,
-      secure: false, // false for localhost
+      secure: process.env.NODE_ENV === "production", // Only secure in production
       sameSite: "Lax",
-      maxAge: 24 * 60 * 60 * 1000,
-    });
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    })
 
-    res.json({ token, username: user.username });
+    // Return token in response body for non-browser clients and localStorage storage
+    res.json({
+      token,
+      username: user.username,
+      walletBalance: user.walletBalance || 0,
+      profilePicture: user.profilePicture || null,
+    })
   } catch (error) {
-    console.error("Login Error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("Login Error:", error)
+    res.status(500).json({ error: "Internal server error" })
   }
-};
+}
+
+// Add a verification endpoint for checking authentication status
+exports.verifyAuth = async (req, res) => {
+  try {
+    // Get token from Authorization header or cookie
+    const authHeader = req.headers.authorization
+    const authCookie = req.cookies?.authData
+
+    let token
+
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      // Extract token from Authorization header
+      token = authHeader.substring(7)
+    } else if (authCookie) {
+      // Extract token from cookie
+      const cookieData = JSON.parse(authCookie)
+      token = cookieData.token
+    }
+
+    if (!token) {
+      return res.status(401).json({ authenticated: false, message: "No authentication token provided" })
+    }
+
+    // Verify the token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET)
+
+    // Find the user
+    const user = await User.findById(decoded.id)
+
+    if (!user) {
+      return res.status(401).json({ authenticated: false, message: "User not found" })
+    }
+
+    // User is authenticated
+    return res.status(200).json({
+      authenticated: true,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        walletBalance: user.walletBalance || 0,
+        profilePicture: user.profilePicture || null,
+      },
+    })
+  } catch (error) {
+    console.error("Auth verification error:", error)
+    return res.status(401).json({ authenticated: false, message: "Invalid or expired token" })
+  }
+}
+
+// Add a logout endpoint
+exports.logout = async (req, res) => {
+  try {
+    // Clear the auth cookie
+    res.clearCookie("authData")
+
+    return res.status(200).json({ success: true, message: "Logged out successfully" })
+  } catch (error) {
+    console.error("Logout error:", error)
+    return res.status(500).json({ success: false, message: "Error during logout" })
+  }
+}
 
 
 exports.updateProfile = async (req, res) => {
