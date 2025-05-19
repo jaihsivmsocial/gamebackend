@@ -234,7 +234,7 @@ exports.placeBet = async (req, res) => {
           console.log("Created new question on demand:", question._id)
         } catch (createError) {
           console.error("Error creating new question:", createError)
-          throw createError // Re-throw to be caught by the outer try/catch
+          throw createError
         }
       }
     } catch (error) {

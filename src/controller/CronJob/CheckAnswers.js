@@ -4,8 +4,6 @@ const BetQuestion = require("../../model/battingModel/BetQuestion");
 const Bet = require("../../model/battingModel/Bet");
 const User = require("../../model/userModel");
 
-
-
 async function processOngoingBetQuestions() {
   try {
     const ongoingQuestions = await BetQuestion.find({ status: "ongoing" });
@@ -15,44 +13,39 @@ async function processOngoingBetQuestions() {
       return;
     }
 
-    const userRewardsMap = new Map(); // userId => rewardAmount
+    const userRewardsMap = new Map(); // userId => totalPotentialPayout
     const processedQuestionIds = [];
 
     for (const question of ongoingQuestions) {
-      const { _id: questionId, totalBetAmount, correctChoice } = question;
+      const { _id: questionId, correctChoice } = question;
 
       if (!correctChoice) {
         console.log(`Skipping question ${questionId} — no correctChoice set.`);
         continue;
       }
 
-      const platformFee = totalBetAmount * 0.05;
-      const distributablePool = totalBetAmount - platformFee;
-
       const winningBets = await Bet.find({
         question: questionId,
         choice: correctChoice,
       });
 
-      const totalWinningAmount = winningBets.reduce((sum, bet) => sum + bet.amount, 0);
-      if (totalWinningAmount === 0) {
+      if (!winningBets.length) {
         console.log(`No winning bets for question ${questionId}`);
-        processedQuestionIds.push(questionId); // Still mark it completed
+        processedQuestionIds.push(questionId);
         continue;
       }
 
       for (const bet of winningBets) {
-        const contributionPercent = bet.amount / totalWinningAmount;
-        const reward = Math.floor(distributablePool * contributionPercent);
-
         const userId = bet.user.toString();
+        const reward = bet.potentialPayout || 0;
+
         userRewardsMap.set(userId, (userRewardsMap.get(userId) || 0) + reward);
       }
 
       processedQuestionIds.push(questionId);
     }
 
-    // Bulk update users
+    // Bulk update users' wallet balances and totalWins
     if (userRewardsMap.size > 0) {
       const bulkUserOps = Array.from(userRewardsMap.entries()).map(([userId, rewardAmount]) => ({
         updateOne: {
@@ -61,7 +54,7 @@ async function processOngoingBetQuestions() {
             $inc: {
               totalWins: rewardAmount,
               walletBalance: rewardAmount,
-              biggestWin: rewardAmount, // You may want to customize this to keep max value
+              biggestWin: rewardAmount,
             },
           },
         },
@@ -71,7 +64,7 @@ async function processOngoingBetQuestions() {
       console.log("User rewards updated successfully.");
     }
 
-    // Bulk update BetQuestions to 'completed'
+    // Mark questions as completed
     if (processedQuestionIds.length > 0) {
       const bulkQuestionOps = processedQuestionIds.map((id) => ({
         updateOne: {
@@ -88,12 +81,7 @@ async function processOngoingBetQuestions() {
   }
 }
 
-// Schedule the cron job to run every 10 minutes
-// cron.schedule('*/10 * * * *', () => {
-//   myFunction();
-// });
 
- // Run every 1 minute
-cron.schedule('* * * * *', () => {
+ cron.schedule('* * * * *', () => {
 processOngoingBetQuestions()
 });

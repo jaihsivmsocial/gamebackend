@@ -1,6 +1,6 @@
-
 const { Server } = require("socket.io");
 const { createAdapter } = require("@socket.io/redis-adapter");
+
 const {
   redisClient,
   redisPubClient,
@@ -18,7 +18,7 @@ const BetQuestion = require("../model/battingModel/BetQuestion");
 const Bet = require("../model/battingModel/Bet");
 const BetStats = require("../model/battingModel/BetStats");
 const fetch = require("node-fetch");
-
+const processOngoingBetQuestions = require("../controller/setCorrectAnswer/setCorrectAnswer")
 const questionTimers = new Map();
 
 // Add this near the top of the file with other variables
@@ -53,6 +53,7 @@ const generateRandomQuestion = async () => {
     }
     // Use the camera holder name as the subject
     const subject = currentCameraHolder.CameraHolderName;
+    
     // let totalTime = 30
 
     const conditions = [
@@ -116,27 +117,26 @@ async function generateNewQuestion(specificStreamId = null) {
 
     // Get the dynamic question with camera holder name as subject
     const { subject, condition } = await generateRandomQuestion();
+    // console.log("subject----", subject)
     const questionText = `Will ${subject} ${condition}?`;
 
-
-   let match = questionText.match(/(\d+)\s*Sec/i);
- let competitionTime;
-if (match) {
-  console.log("match------------------------------", match[1]); // "35"
-   competitionTime = 36 + Number(match[1])||0;
-      console.log("compitationTime------------------------------", competitionTime)
-
-} else {
-  console.log("No number found before 'Sec'");
-}
+    let match = questionText.match(/(\d+)\s*Sec/i);
+        console.log("match --------------------------", match)
 
 
+    let kills = questionText.match(/(\d+)\s*Kill/i);
+    // console.log("kills --------------------------", kills)
 
-    console.log("question Text-----------------------------------------------------------------------", questionText)
+    let competitionTime;
+
+    console.log(
+      "question Text-----------------------------------------------------------------------",
+      questionText
+    );
+
+
     const now = new Date();
     const endTime = new Date(now.getTime() + 36000); // 36 seconds countdown
-
-
 
     // Use provided streamId or default
     const streamId = specificStreamId || "default-stream";
@@ -154,10 +154,32 @@ if (match) {
       totalBetAmount: 0,
       totalPlayers: 0,
       hasBets: false,
-      streamId: streamId, 
+      streamId: streamId,
     });
 
-    await newQuestion.save();
+    let newQuestions = await newQuestion.save();
+
+    console.log("newQuestions-------------------------", newQuestions._id)
+
+    if (match) {
+      console.log("match------------------------------", match[1]); // "35"
+      competitionTime = 36 + Number(match[1]) || 0;
+      noOfKills = Number(kills[1]) || 0
+       
+
+      await processOngoingBetQuestions.processOngoingBetQuestions(newQuestions._id,subject, noOfKills )
+  //     setTimeout(() => {
+  //   processOngoingBetQuestions.processOngoingBetQuestions(newQuestions._id, subject, noOfKills);
+  // }, competitionTime * 1000); // Convert seconds to milliseconds
+      // console.log(
+      //   "compitationTime------------------------------",
+      //   competitionTime
+      // );
+    } else {
+      console.log("No number found before 'Sec'");
+    }
+
+
 
     // Emit socket event for new question
     io.emit("new_question", {
@@ -173,7 +195,7 @@ if (match) {
       totalBetAmount: 0,
       totalPlayers: 0,
     });
-    console.log("New betting question generated:", questionText);
+    // console.log("New betting question generated:", questionText);
 
     // Schedule question resolution after 36 seconds
     const timerId = setTimeout(() => resolveQuestion(newQuestion._id), 36000);
@@ -249,10 +271,7 @@ async function resolveQuestion(questionId) {
       clearTimeout(questionTimers.get(questionId.toString()));
       questionTimers.delete(questionId.toString());
     }
-  } catch (error) {
-    
-    
-  }
+  } catch (error) {}
 }
 
 // Add this function to check for camera holder changes

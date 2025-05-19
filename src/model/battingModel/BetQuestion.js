@@ -73,7 +73,7 @@ const BetQuestionSchema = new mongoose.Schema(
     },
     correctChoice:{
       type: String,
-      default: "Yes",
+      default: "",
     },
     status: {
       type: String,
