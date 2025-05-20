@@ -6,20 +6,35 @@ const crypto = require("crypto");
 const { sendOtpEmail } = require('../utils/email');
 const axios = require('axios'); 
 require('dotenv').config();
+
 // PlayFab configuration
 const PLAYFAB_TITLE_ID = process.env.PLAYFAB_TITLE_ID;
 const PLAYFAB_SECRET_KEY = process.env.PLAYFAB_SECRET_KEY;
 const PLAYFAB_API_URL = `https://${PLAYFAB_TITLE_ID}.playfabapi.com`;
 
-// Helper function to interact with PlayFab API
-async function playfabRequest(endpoint, data) {
+// Enhanced PlayFab request function with better error handling and logging
+async function playfabRequest(endpoint, data, headers = {}) {
   try {
+    console.log(`Making PlayFab request to: ${PLAYFAB_API_URL}${endpoint}`);
+    console.log('Request data:', JSON.stringify(data, null, 2));
+    
+    // Determine which headers to use based on the endpoint
+    let requestHeaders = {
+      'Content-Type': 'application/json',
+      ...headers
+    };
+    
+    // Add X-SecretKey for admin/server endpoints
+    if (endpoint.startsWith('/Admin') || endpoint.startsWith('/Server')) {
+      requestHeaders['X-SecretKey'] = PLAYFAB_SECRET_KEY;
+    }
+    
+    // Make the API request
     const response = await axios.post(`${PLAYFAB_API_URL}${endpoint}`, data, {
-      headers: {
-        'Content-Type': 'application/json',
-        'X-SecretKey': PLAYFAB_SECRET_KEY
-      }
+      headers: requestHeaders
     });
+    
+    console.log(`PlayFab response from ${endpoint}:`, JSON.stringify(response.data, null, 2));
     return response.data;
   } catch (error) {
     console.error(`PlayFab API Error (${endpoint}):`, error.response?.data || error.message);
@@ -56,6 +71,7 @@ exports.register = async (req, res) => {
         Password: password, // PlayFab will handle password security
         RequireBothUsernameAndEmail: true
       });
+      
       // 2. Create new user in MongoDB with PlayFab ID
       const user = new User({
         username: standardizedUsername,
@@ -72,7 +88,11 @@ exports.register = async (req, res) => {
       // Generate JWT token for immediate login
       const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: "7d" });
 
+      // Return the complete response including the full PlayFab response
       res.status(201).json({
+        code: playfabResponse.code,
+        status: playfabResponse.status,
+        data: playfabResponse.data,
         message: "User registered successfully",
         token,
         user: {
@@ -81,7 +101,7 @@ exports.register = async (req, res) => {
           email: user.email,
           profilePicture: user.profilePicture,
           playfabId: user.playfabId
-        },
+        }
       });
     } catch (playfabError) {
       // If PlayFab registration fails, return error
@@ -147,11 +167,13 @@ exports.login = async (req, res) => {
       const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, {
         expiresIn: "24h",
       });
+      
       // Set both cookie and return token in response for maximum compatibility
       const cookieData = {
         token: token,
         username: user.username,
       };
+      
       // Set HTTP-only cookie for secure browser storage
       res.cookie("authData", JSON.stringify(cookieData), {
         httpOnly: true,
@@ -160,8 +182,11 @@ exports.login = async (req, res) => {
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       });
 
-      // Return token in response body for non-browser clients and localStorage storage
+      // Return the complete PlayFab response structure
       res.json({
+        code: playfabResponse.code,
+        status: playfabResponse.status,
+        data: playfabResponse.data,
         token,
         username: user.username,
         walletBalance: user.walletBalance || 0,
@@ -238,9 +263,11 @@ exports.verifyAuth = async (req, res) => {
 
     // Verify PlayFab session if available
     let playfabStatus = { active: false };
+    let playfabResponse = null;
+    
     if (user.playfabSessionTicket) {
       try {
-        const playfabResponse = await playfabRequest('/Client/GetPlayerProfile', {
+        playfabResponse = await playfabRequest('/Client/GetPlayerProfile', {
           PlayFabId: user.playfabId,
           ProfileConstraints: {
             ShowDisplayName: true,
@@ -255,8 +282,8 @@ exports.verifyAuth = async (req, res) => {
       }
     }
 
-    // User is authenticated
-    return res.status(200).json({
+    // User is authenticated - include full PlayFab response if available
+    const response = {
       authenticated: true,
       user: {
         id: user._id,
@@ -266,8 +293,15 @@ exports.verifyAuth = async (req, res) => {
         profilePicture: user.profilePicture || null,
         playfabId: user.playfabId,
         playfabStatus
-      },
-    });
+      }
+    };
+    
+    // Add PlayFab response if available
+    if (playfabResponse) {
+      response.playfab = playfabResponse;
+    }
+    
+    return res.status(200).json(response);
   } catch (error) {
     console.error("Auth verification error:", error);
     return res.status(401).json({ authenticated: false, message: "Invalid or expired token" });
@@ -279,6 +313,7 @@ exports.logout = async (req, res) => {
   try {
     // Get user from request (assuming middleware sets this)
     const userId = req.user?.id;
+    let playfabResponse = null;
     
     if (userId) {
       const user = await User.findById(userId);
@@ -286,7 +321,7 @@ exports.logout = async (req, res) => {
       // Logout from PlayFab if we have a session ticket
       if (user && user.playfabSessionTicket) {
         try {
-          await playfabRequest('/Client/ForgetAllCredentials', {
+          playfabResponse = await playfabRequest('/Client/ForgetAllCredentials', {
             SessionTicket: user.playfabSessionTicket
           });
           
@@ -303,7 +338,14 @@ exports.logout = async (req, res) => {
     // Clear the auth cookie
     res.clearCookie("authData");
 
-    return res.status(200).json({ success: true, message: "Logged out successfully" });
+    const response = { success: true, message: "Logged out successfully" };
+    
+    // Add PlayFab response if available
+    if (playfabResponse) {
+      response.playfab = playfabResponse;
+    }
+    
+    return res.status(200).json(response);
   } catch (error) {
     console.error("Logout error:", error);
     return res.status(500).json({ success: false, message: "Error during logout" });
@@ -339,6 +381,7 @@ exports.updateProfile = async (req, res) => {
     ).select("-password -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires");
 
     // Update user data in PlayFab if we have a PlayFab ID
+    let playfabResponse = null;
     if (user.playfabId && user.playfabSessionTicket) {
       try {
         // Prepare PlayFab update data
@@ -346,20 +389,25 @@ exports.updateProfile = async (req, res) => {
         if (location !== undefined) playfabUpdateData.Location = location;
         
         // Update PlayFab user data
-        await playfabRequest('/Client/UpdateUserData', {
+        playfabResponse = await playfabRequest('/Client/UpdateUserData', {
           SessionTicket: user.playfabSessionTicket,
           Data: playfabUpdateData
         });
         
         // If profile picture is updated, we could also update it in PlayFab
-        // This depends on how you're handling profile pictures in PlayFab
         if (profilePicture !== undefined) {
           // Example: Update PlayFab display name or avatar URL
-          await playfabRequest('/Client/UpdateUserTitleDisplayName', {
+          const displayNameResponse = await playfabRequest('/Client/UpdateUserTitleDisplayName', {
             SessionTicket: user.playfabSessionTicket,
             DisplayName: user.username,
             // You might store the profile picture URL in custom data
           });
+          
+          // Merge responses
+          playfabResponse = {
+            ...playfabResponse,
+            displayNameUpdate: displayNameResponse
+          };
         }
       } catch (playfabError) {
         console.error("PlayFab profile update error:", playfabError);
@@ -367,17 +415,23 @@ exports.updateProfile = async (req, res) => {
       }
     }
 
-    res.status(200).json({
+    const response = {
       message: "Profile updated successfully",
-      user: updatedUser,
-    });
+      user: updatedUser
+    };
+    
+    // Add PlayFab response if available
+    if (playfabResponse) {
+      response.playfab = playfabResponse;
+    }
+    
+    res.status(200).json(response);
   } catch (error) {
     console.error("Error updating profile:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
-// The rest of your controller functions remain the same
 // Check if username is available
 exports.checkUsername = async (req, res) => {
   try {
@@ -391,18 +445,25 @@ exports.checkUsername = async (req, res) => {
     }
 
     // Check in PlayFab
+    let playfabResponse = null;
     try {
-      const playfabResponse = await playfabRequest('/Client/GetAccountInfo', {
+      playfabResponse = await playfabRequest('/Client/GetAccountInfo', {
         TitleId: PLAYFAB_TITLE_ID,
         Username: username
       });
       
       // If we get here, the username exists in PlayFab
-      return res.status(400).json({ message: "Username taken" });
+      return res.status(400).json({ 
+        message: "Username taken",
+        playfab: playfabResponse
+      });
     } catch (playfabError) {
       // If error is "AccountNotFound", username is available
       if (playfabError.response?.data?.errorCode === 1001) {
-        return res.status(200).json({ message: "Username available" });
+        return res.status(200).json({ 
+          message: "Username available",
+          playfabError: playfabError.response?.data
+        });
       }
       
       // For other errors, we'll assume it's available in PlayFab
@@ -576,12 +637,11 @@ exports.verifyOtpAndResetPassword = async (req, res) => {
     await user.save();
 
     // Update password in PlayFab if user has a PlayFab account
+    let playfabResponse = null;
     if (user.playfabId) {
       try {
-        // First, we need to get a session ticket by logging in with the old credentials
-        // This is a bit tricky since we don't have the old password anymore
-        // We'll use admin API to reset the password
-        await playfabRequest('/Admin/ResetPassword', {
+        // Use admin API to reset the password
+        playfabResponse = await playfabRequest('/Admin/ResetPassword', {
           PlayFabId: user.playfabId,
           Password: newPassword
         });
@@ -591,9 +651,92 @@ exports.verifyOtpAndResetPassword = async (req, res) => {
       }
     }
 
-    res.status(200).json({ message: "Password reset successful" });
+    const response = { message: "Password reset successful" };
+    
+    // Add PlayFab response if available
+    if (playfabResponse) {
+      response.playfab = playfabResponse;
+    }
+    
+    res.status(200).json(response);
   } catch (error) {
     console.error("OTP verification error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// Direct PlayFab API access endpoints
+// These endpoints allow direct access to PlayFab APIs through your server
+
+exports.directPlayFabRegister = async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+    
+    if (!username || !email || !password) {
+      return res.status(400).json({ message: "Username, email, and password are required" });
+    }
+    
+    const playfabResponse = await playfabRequest('/Client/RegisterPlayFabUser', {
+      TitleId: PLAYFAB_TITLE_ID,
+      Username: username,
+      Email: email,
+      Password: password,
+      RequireBothUsernameAndEmail: true
+    });
+    
+    // Return the complete PlayFab response
+    res.status(200).json(playfabResponse);
+  } catch (error) {
+    console.error("Direct PlayFab register error:", error);
+    res.status(error.response?.status || 500).json(error.response?.data || { message: "Server error" });
+  }
+};
+
+exports.directPlayFabLogin = async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ message: "Username and password are required" });
+    }
+    
+    const playfabResponse = await playfabRequest('/Client/LoginWithPlayFab', {
+      TitleId: PLAYFAB_TITLE_ID,
+      Username: username,
+      Password: password
+    });
+    
+    // Return the complete PlayFab response
+    res.status(200).json(playfabResponse);
+  } catch (error) {
+    console.error("Direct PlayFab login error:", error);
+    res.status(error.response?.status || 500).json(error.response?.data || { message: "Server error" });
+  }
+};
+
+// Generic PlayFab API proxy endpoint
+exports.playFabProxy = async (req, res) => {
+  try {
+    const { endpoint } = req.params;
+    const data = req.body;
+    
+    // Add TitleId if not provided
+    if (!data.TitleId && endpoint.startsWith('/Client/')) {
+      data.TitleId = PLAYFAB_TITLE_ID;
+    }
+    
+    // Get session ticket from headers if available
+    const headers = {};
+    if (req.headers['x-authorization']) {
+      headers['X-Authorization'] = req.headers['x-authorization'];
+    }
+    
+    const playfabResponse = await playfabRequest(endpoint, data, headers);
+    
+    // Return the complete PlayFab response
+    res.status(200).json(playfabResponse);
+  } catch (error) {
+    console.error(`PlayFab proxy error (${req.params.endpoint}):`, error);
+    res.status(error.response?.status || 500).json(error.response?.data || { message: "Server error" });
   }
 };
