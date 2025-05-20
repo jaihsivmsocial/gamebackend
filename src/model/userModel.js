@@ -35,14 +35,13 @@ const UserSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    // Remove required: true from otp and newpasword
     otp: {
       type: String,
-      required: false, // Changed from true to false
+      required: false, 
     },
     newpasword: {
       type: String,
-      required: false, // Changed from true to false
+      required: false, 
     },
     streamKey: {
       type: String,
@@ -51,6 +50,14 @@ const UserSchema = new mongoose.Schema(
     },
     playfabId: {
       type: String,
+      sparse: true,
+    },
+    playfabSessionTicket: {
+      type: String,
+      sparse: true,
+    },
+    playfabLastLogin: {
+      type: Date,
       sparse: true,
     },
     walletBalance: {
@@ -86,4 +93,3 @@ const UserSchema = new mongoose.Schema(
 )
 
 module.exports = mongoose.model("User", UserSchema)
-

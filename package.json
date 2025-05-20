@@ -12,6 +12,7 @@
   "dependencies": {
     "@socket.io/redis-adapter": "^8.3.0",
     "aws-sdk": "^2.1692.0",
+    "axios": "^1.9.0",
     "bcrypt": "^5.1.1",
     "bcryptjs": "^3.0.2",
     "body-parser": "^1.20.3",
@@ -31,8 +32,8 @@
     "nanoid": "^5.1.5",
     "node-cron": "^3.0.3",
     "nodemailer": "^6.10.0",
-    "npm": "^11.2.0",
-    "playfab-sdk": "^2.170.250314",
+    "npm": "^11.4.0",
+    "playfab-sdk": "^2.173.250512",
     "rate-limit": "^0.1.1",
     "redis": "^4.7.0",
     "resend": "^4.2.0",
