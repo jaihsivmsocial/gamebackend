@@ -3532,7 +3532,6 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       userId = req.user.id || req.user._id || req.user.userId
       console.log("Using user ID from token:", userId)
     }
-
     if (!userId) {
       return res.status(400).json({
         success: false,
