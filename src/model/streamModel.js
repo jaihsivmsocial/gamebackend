@@ -1,4 +1,4 @@
-const mongoose = require("mongoose")
+const mongoose = require("mongoose");
 
 const streamSchema = new mongoose.Schema(
   {
@@ -72,13 +72,12 @@ const streamSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  },
-)
+  }
+);
 
 // Index for faster queries
-streamSchema.index({ status: 1, startTime: -1 })
-streamSchema.index({ broadcaster: 1, status: 1 })
-streamSchema.index({ streamId: 1 }) // Index on the metaField
+streamSchema.index({ status: 1, startTime: -1 });
+streamSchema.index({ broadcaster: 1, status: 1 });
+streamSchema.index({ streamId: 1 }); // Index on the metaField
 
-module.exports = mongoose.model("Stream", streamSchema)
-
+module.exports = mongoose.model("Stream", streamSchema);

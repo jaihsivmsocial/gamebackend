@@ -1,5 +1,5 @@
-const mongoose = require("mongoose")
-const bcrypt = require("bcrypt")
+const mongoose = require("mongoose");
+const bcrypt = require("bcrypt");
 
 const UserSchema = new mongoose.Schema(
   {
@@ -37,11 +37,11 @@ const UserSchema = new mongoose.Schema(
     },
     otp: {
       type: String,
-      required: false, 
+      required: false,
     },
     newpasword: {
       type: String,
-      required: false, 
+      required: false,
     },
     streamKey: {
       type: String,
@@ -62,7 +62,7 @@ const UserSchema = new mongoose.Schema(
     },
     walletBalance: {
       type: Number,
-      // default: 300, 
+      // default: 300,
     },
     totalBets: {
       type: Number,
@@ -89,7 +89,7 @@ const UserSchema = new mongoose.Schema(
     resetOtp: String,
     resetOtpExpires: Date,
   },
-  { timestamps: true },
-)
+  { timestamps: true }
+);
 
-module.exports = mongoose.model("User", UserSchema)
+module.exports = mongoose.model("User", UserSchema);

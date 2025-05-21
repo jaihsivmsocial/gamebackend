@@ -28,7 +28,6 @@ exports.getMessages = async (req, res) => {
 
     // If not enough messages in Redis, fetch from MongoDB
     const messages = await Message.find({ streamId }).sort({ timestamp: -1 }).limit(Number.parseInt(limit)).exec()
-
     const formattedMessages = messages.map((msg) => ({
       id: msg._id.toString(),
       content: msg.content,

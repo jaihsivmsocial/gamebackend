@@ -3,6 +3,8 @@ const User = require("../../model/userModel");
 const BetQuestion = require("../../model/battingModel/BetQuestion");
 const playerModel = require("../../model/battingModel/playerModel");
 
+
+
 exports.processOngoingBetQuestions = async (_id, subject, noOfKills) => {
   console.log(`Processing bet question: ID=${_id}, Subject=${subject}, Required Kills=${noOfKills}`);
   try {
