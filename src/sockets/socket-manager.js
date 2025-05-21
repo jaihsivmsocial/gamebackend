@@ -18,7 +18,7 @@ const BetQuestion = require("../model/battingModel/BetQuestion");
 const Bet = require("../model/battingModel/Bet");
 const BetStats = require("../model/battingModel/BetStats");
 const fetch = require("node-fetch");
-const processOngoingBetQuestions = require("../controller/setCorrectAnswer/setCorrectAnswer")
+const processOngoingBetQuestions = require("../controller/setCorrectAnswer/setCorrectAnswer");
 const questionTimers = new Map();
 
 // Add this near the top of the file with other variables
@@ -53,7 +53,7 @@ const generateRandomQuestion = async () => {
     }
     // Use the camera holder name as the subject
     const subject = currentCameraHolder.CameraHolderName;
-    
+
     // let totalTime = 30
 
     const conditions = [
@@ -121,8 +121,7 @@ async function generateNewQuestion(specificStreamId = null) {
     const questionText = `Will ${subject} ${condition}?`;
 
     let match = questionText.match(/(\d+)\s*Sec/i);
-        console.log("match --------------------------", match)
-
+    console.log("match --------------------------", match);
 
     let kills = questionText.match(/(\d+)\s*Kill/i);
     // console.log("kills --------------------------", kills)
@@ -133,7 +132,6 @@ async function generateNewQuestion(specificStreamId = null) {
       "question Text-----------------------------------------------------------------------",
       questionText
     );
-
 
     const now = new Date();
     const endTime = new Date(now.getTime() + 36000); // 36 seconds countdown
@@ -159,18 +157,21 @@ async function generateNewQuestion(specificStreamId = null) {
 
     let newQuestions = await newQuestion.save();
 
-    console.log("newQuestions-------------------------", newQuestions._id)
+    console.log("newQuestions-------------------------", newQuestions._id);
 
     if (match) {
       console.log("match------------------------------", match[1]); // "35"
       competitionTime = 36 + Number(match[1]) || 0;
-      noOfKills = Number(kills[1]) || 0
-       
+      noOfKills = Number(kills[1]) || 0;
 
-      await processOngoingBetQuestions.processOngoingBetQuestions(newQuestions._id,subject, noOfKills )
-  //     setTimeout(() => {
-  //   processOngoingBetQuestions.processOngoingBetQuestions(newQuestions._id, subject, noOfKills);
-  // }, competitionTime * 1000); // Convert seconds to milliseconds
+      // await processOngoingBetQuestions.processOngoingBetQuestions(newQuestions._id,subject, noOfKills )
+      setTimeout(() => {
+        processOngoingBetQuestions.processOngoingBetQuestions(
+          newQuestions._id,
+          subject,
+          noOfKills
+        );
+      }, competitionTime * 1000); // Convert seconds to milliseconds
       // console.log(
       //   "compitationTime------------------------------",
       //   competitionTime
@@ -178,8 +179,6 @@ async function generateNewQuestion(specificStreamId = null) {
     } else {
       console.log("No number found before 'Sec'");
     }
-
-
 
     // Emit socket event for new question
     io.emit("new_question", {
@@ -1517,7 +1516,6 @@ module.exports = async function setupSocketIO(server) {
 
   return io;
 };
-
 // Export the io instance and the getCurrentCameraHolder function
 module.exports.io = io;
 module.exports.getCurrentCameraHolder = getCurrentCameraHolder;

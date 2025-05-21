@@ -513,7 +513,6 @@ exports.decrementViewerCount = async (req, res) => {
     if (wasCounted) {
       // Remove this client from counted viewers
       await redisClient.del(viewerKey)
-
       // Decrement viewer count in Redis
       const viewerCount = await viewerCounter.decrementViewers(streamId)
 
