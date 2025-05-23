@@ -5,7 +5,7 @@ const {
     verifyAuth,
   checkUsername,
   forgotPassword,
-
+updateProfile,
   requestOtpReset,
   verifyOtpAndResetPassword,
 
@@ -20,7 +20,8 @@ router.get("/1/:username", checkUsername)
 router.post("/forgot-password", forgotPassword)
 router.post("/request-otp-reset", requestOtpReset)
 router.post("/verify-otp-reset", verifyOtpAndResetPassword)
-router.post("./verify-auth",  verifyAuth)
+router.post("/verify-auth",  verifyAuth)
+router.put("/updateProfile",  authMiddleware, updateProfile)
 
 
 module.exports = router

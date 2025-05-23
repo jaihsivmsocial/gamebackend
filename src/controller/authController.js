@@ -5,6 +5,11 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { sendOtpEmail } = require('../utils/email');
 const axios = require('axios'); 
+const AWS = require('aws-sdk');
+const { v4: uuidv4 } = require('uuid');
+const multer = require('multer');
+const multerS3 = require('multer-s3');
+const path = require('path');
 require('dotenv').config();
 
 // PlayFab configuration
@@ -352,14 +357,189 @@ exports.logout = async (req, res) => {
   }
 };
 
-// Update profile with PlayFab sync
+
+// exports.updateProfile = async (req, res) => {
+//   try {
+//     if (!req.user || !req.user.id) {
+//       return res.status(401).json({ message: "Unauthorized: User ID is missing" });
+//     }
+
+//     const { profilePicture } = req.body;
+//     const userId = req.user.id;
+
+//     // Find the user
+//     const user = await User.findById(userId);
+//     if (!user) {
+//       return res.status(404).json({ message: "User not found" });
+//     }
+
+//     // Build update object dynamically
+//     const updateData = {};
+  
+//     if (profilePicture !== undefined) updateData.profilePicture = profilePicture;
+
+//     // Update user in MongoDB
+//     const updatedUser = await User.findByIdAndUpdate(
+//       userId,
+//       updateData,
+//       { new: true, runValidators: true }
+//     ).select("-password -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires");
+
+//     // Update user data in PlayFab if we have a PlayFab ID
+//     let playfabResponse = null;
+//     if (user.playfabId && user.playfabSessionTicket) {
+//       try {
+//         // Prepare PlayFab update data
+//         const playfabUpdateData = {};
+//         if (location !== undefined) playfabUpdateData.Location = location;
+        
+//         // Update PlayFab user data
+//         playfabResponse = await playfabRequest('/Client/UpdateUserData', {
+//           SessionTicket: user.playfabSessionTicket,
+//           Data: playfabUpdateData
+//         });
+        
+//         // If profile picture is updated, we could also update it in PlayFab
+//         if (profilePicture !== undefined) {
+//           // Example: Update PlayFab display name or avatar URL
+//           const displayNameResponse = await playfabRequest('/Client/UpdateUserTitleDisplayName', {
+//             SessionTicket: user.playfabSessionTicket,
+//             DisplayName: user.username,
+//             // You might store the profile picture URL in custom data
+//           });
+          
+//           // Merge responses
+//           playfabResponse = {
+//             ...playfabResponse,
+//             displayNameUpdate: displayNameResponse
+//           };
+//         }
+//       } catch (playfabError) {
+//         console.error("PlayFab profile update error:", playfabError);
+//         // We don't fail the whole update if PlayFab update fails
+//       }
+//     }
+
+//     const response = {
+//       message: "Profile updated successfully",
+//       user: updatedUser
+//     };
+    
+//     // Add PlayFab response if available
+//     if (playfabResponse) {
+//       response.playfab = playfabResponse;
+//     }
+    
+//     res.status(200).json(response);
+//   } catch (error) {
+//     console.error("Error updating profile:", error);
+//     res.status(500).json({ message: "Server error", error: error.message });
+//   }
+// };
+
+// Check if username is available
+
+
+
+
+
+// Configure AWS S3
+
+
+AWS.config.update({
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  region: process.env.AWS_REGION || 'eu-north-1'
+});
+
+const s3 = new AWS.S3();
+
+// Configure multer for memory storage (before S3 upload)
+const storage = multer.memoryStorage();
+
+// File filter to validate file type
+const fileFilter = (req, file, cb) => {
+  console.log('Received file:', file.fieldname, file.originalname, file.mimetype);
+  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Only JPEG, JPG, PNG, and WEBP are allowed.'), false);
+  }
+};
+
+// Configure multer upload
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  }
+});
+
+// Helper function to upload to S3
+const uploadToS3 = async (file) => {
+  const fileExtension = path.extname(file.originalname);
+  const fileName = `profile-pictures/${uuidv4()}${fileExtension}`;
+  
+  // IMPORTANT: NO ACL PARAMETER HERE
+  const params = {
+    Bucket: process.env.AWS_S3_BUCKET_NAME,
+    Key: fileName,
+    Body: file.buffer,
+    ContentType: file.mimetype
+  };
+  
+  const result = await s3.upload(params).promise();
+  return result.Location; // Return the URL of the uploaded file
+};
+
+// Main profile update controller
 exports.updateProfile = async (req, res) => {
+  console.log('Update profile request received');
+  console.log('Request body fields:', Object.keys(req.body));
+  console.log('Request files:', req.files ? Object.keys(req.files) : 'No files');
+  
+  // Wrap the multer upload in a promise to handle it properly
+  const handleUpload = () => {
+    return new Promise((resolve, reject) => {
+      upload.single('profilePicture')(req, res, (err) => {
+        if (err) {
+          console.error('Multer error:', err);
+          if (err.code === 'LIMIT_FILE_SIZE') {
+            return reject(new Error('File size exceeds the 5MB limit'));
+          }
+          if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+            return reject(new Error(`Unexpected field. Please use 'profilePicture' as the field name for your file upload.`));
+          }
+          return reject(err);
+        }
+        console.log('File upload processed successfully');
+        if (req.file) {
+          console.log('File details:', {
+            fieldname: req.file.fieldname,
+            originalname: req.file.originalname,
+            mimetype: req.file.mimetype,
+            size: req.file.size
+          });
+        } else {
+          console.log('No file was uploaded');
+        }
+        resolve();
+      });
+    });
+  };
+
   try {
+    // Handle file upload first
+    await handleUpload();
+
+    // Validate user authentication
     if (!req.user || !req.user.id) {
       return res.status(401).json({ message: "Unauthorized: User ID is missing" });
     }
 
-    const { location, profilePicture } = req.body;
     const userId = req.user.id;
 
     // Find the user
@@ -368,10 +548,32 @@ exports.updateProfile = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Build update object dynamically
+    // Build update object
     const updateData = {};
-    if (location !== undefined) updateData.location = location;
-    if (profilePicture !== undefined) updateData.profilePicture = profilePicture;
+    
+    // Handle profile picture upload if a file was provided
+    if (req.file) {
+      try {
+        const profilePictureUrl = await uploadToS3(req.file);
+        updateData.profilePicture = profilePictureUrl;
+        console.log('Image uploaded to S3:', profilePictureUrl);
+      } catch (uploadError) {
+        console.error('S3 upload error:', uploadError);
+        return res.status(400).json({ 
+          message: "Error uploading profile picture", 
+          error: uploadError.message 
+        });
+      }
+    } else if (req.body.profilePicture) {
+      // If a URL was provided directly (e.g., from a previous upload)
+      updateData.profilePicture = req.body.profilePicture;
+      console.log('Using provided profile picture URL:', updateData.profilePicture);
+    }
+
+    // If no update data, return early
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({ message: "No update data provided" });
+    }
 
     // Update user in MongoDB
     const updatedUser = await User.findByIdAndUpdate(
@@ -380,35 +582,50 @@ exports.updateProfile = async (req, res) => {
       { new: true, runValidators: true }
     ).select("-password -verificationToken -verificationTokenExpires -resetPasswordToken -resetPasswordExpires");
 
+    console.log('User updated in MongoDB');
+
     // Update user data in PlayFab if we have a PlayFab ID
     let playfabResponse = null;
-    if (user.playfabId && user.playfabSessionTicket) {
+    if (user.playfabId && user.playfabSessionTicket && updateData.profilePicture) {
       try {
-        // Prepare PlayFab update data
-        const playfabUpdateData = {};
-        if (location !== undefined) playfabUpdateData.Location = location;
+        console.log('Updating PlayFab profile with new image URL');
         
-        // Update PlayFab user data
-        playfabResponse = await playfabRequest('/Client/UpdateUserData', {
+        // Update PlayFab with the new profile picture URL in user data
+        const userDataResponse = await playfabRequest('/Client/UpdateUserData', {
           SessionTicket: user.playfabSessionTicket,
-          Data: playfabUpdateData
+          Data: {
+            ProfilePictureUrl: updateData.profilePicture
+          }
         });
         
-        // If profile picture is updated, we could also update it in PlayFab
-        if (profilePicture !== undefined) {
-          // Example: Update PlayFab display name or avatar URL
-          const displayNameResponse = await playfabRequest('/Client/UpdateUserTitleDisplayName', {
-            SessionTicket: user.playfabSessionTicket,
-            DisplayName: user.username,
-            // You might store the profile picture URL in custom data
-          });
-          
-          // Merge responses
-          playfabResponse = {
-            ...playfabResponse,
-            displayNameUpdate: displayNameResponse
-          };
-        }
+        // Update PlayFab avatar URL
+        const avatarResponse = await playfabRequest('/Client/UpdateAvatarUrl', {
+          SessionTicket: user.playfabSessionTicket,
+          ImageUrl: updateData.profilePicture
+        });
+        
+        // Update display name if needed
+        const displayNameResponse = await playfabRequest('/Client/UpdateUserTitleDisplayName', {
+          SessionTicket: user.playfabSessionTicket,
+          DisplayName: user.username
+        });
+        
+        // Update player profile with the new avatar
+        const profileResponse = await playfabRequest('/Client/UpdatePlayerProfile', {
+          SessionTicket: user.playfabSessionTicket,
+          AvatarUrl: updateData.profilePicture,
+          DisplayName: user.username
+        });
+        
+        // Merge all responses
+        playfabResponse = {
+          userData: userDataResponse,
+          avatar: avatarResponse,
+          displayName: displayNameResponse,
+          profile: profileResponse
+        };
+        
+        console.log('PlayFab profile updated successfully');
       } catch (playfabError) {
         console.error("PlayFab profile update error:", playfabError);
         // We don't fail the whole update if PlayFab update fails
@@ -432,7 +649,26 @@ exports.updateProfile = async (req, res) => {
   }
 };
 
-// Check if username is available
+// Function to delete profile picture from S3 (useful for cleanup)
+exports.deleteProfilePicture = async (imageUrl) => {
+  if (!imageUrl) return;
+  
+  try {
+    // Extract the key from the URL
+    const key = imageUrl.split('/').slice(3).join('/');
+    
+    const params = {
+      Bucket: process.env.AWS_S3_BUCKET_NAME,
+      Key: key
+    };
+    
+    await s3.deleteObject(params).promise();
+  } catch (error) {
+    console.error("Error deleting image from S3:", error);
+    // Handle error as needed
+  }
+};
+
 exports.checkUsername = async (req, res) => {
   try {
     const { username } = req.params;
