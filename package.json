@@ -29,6 +29,8 @@
     "jsonwebtoken": "^9.0.2",
     "jwt-decode": "^4.0.0",
     "mongoose": "^8.12.1",
+    "multer": "^2.0.0",
+    "multer-s3": "^3.0.1",
     "nanoid": "^5.1.5",
     "node-cron": "^3.0.3",
     "nodemailer": "^6.10.0",
@@ -37,8 +39,10 @@
     "rate-limit": "^0.1.1",
     "redis": "^4.7.0",
     "resend": "^4.2.0",
+    "sharp": "^0.34.2",
     "socket.io": "^4.8.1",
     "stripe": "^18.0.0",
+    "uuid": "^11.1.0",
     "winston": "^3.17.0",
     "wrtc": "^0.4.7"
   }

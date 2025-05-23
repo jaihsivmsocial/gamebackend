@@ -752,75 +752,145 @@ module.exports = async function setupSocketIO(server) {
     );
 
     // Handle chat messages
-    socket.on("send_message", async ({ content, streamId, replyTo }) => {
-      try {
-        if (!content.trim() || !streamId) return;
+    // socket.on("send_message", async ({ content, streamId, replyTo }) => {
+    //   try {
+    //     if (!content.trim() || !streamId) return;
 
-        // Check rate limiting - with enhanced feedback
-        const canSend = await checkRateLimit(socket.user.id, streamId);
-        if (!canSend) {
-          socket.emit("error", {
-            message:
-              "Rate limit exceeded. Please wait before sending more messages.",
-            code: "RATE_LIMIT",
-            retryAfter: 2, // Suggest retry after 2 seconds
-          });
-          return;
-        }
+    //     // Check rate limiting - with enhanced feedback
+    //     const canSend = await checkRateLimit(socket.user.id, streamId);
+    //     if (!canSend) {
+    //       socket.emit("error", {
+    //         message:
+    //           "Rate limit exceeded. Please wait before sending more messages.",
+    //         code: "RATE_LIMIT",
+    //         retryAfter: 2, // Suggest retry after 2 seconds
+    //       });
+    //       return;
+    //     }
 
-        const messageId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-        const timestamp = Date.now();
+    //     const messageId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    //     const timestamp = Date.now();
 
-        // Get the real username from socket.handshake.auth if available
-        const realUsername =
-          socket.handshake.auth.realUsername || socket.user.username;
+    //     // Get the real username from socket.handshake.auth if available
+    //     const realUsername =
+    //       socket.handshake.auth.realUsername || socket.user.username;
 
-        // Create message object with real username
-        const message = {
-          id: messageId,
-          content,
-          streamId,
-          timestamp,
-          sender: {
-            id: socket.user.id,
-            username: realUsername, // Use real username instead of anonymous
-            profilePicture: socket.user.profilePicture,
-            isAnonymous: socket.user.isAnonymous,
-          },
-          replyTo: replyTo || null,
-        };
+    //     // Create message object with real username
+    //     const message = {
+    //       id: messageId,
+    //       content,
+    //       streamId,
+    //       timestamp,
+    //       sender: {
+    //         id: socket.user.id,
+    //         username: realUsername, // Use real username instead of anonymous
+    //         profilePicture: socket.user.profilePicture,
+    //         isAnonymous: socket.user.isAnonymous,
+    //       },
+    //       replyTo: replyTo || null,
+    //     };
 
-        // For extremely high volume streams, use sharded message storage
-        // This helps distribute the load across Redis instances
-        const streamShard = getStreamShard(streamId);
-        const messageKey = `messages:${streamShard}:${streamId}`;
+    //     // For extremely high volume streams, use sharded message storage
+    //     // This helps distribute the load across Redis instances
+    //     const streamShard = getStreamShard(streamId);
+    //     const messageKey = `messages:${streamShard}:${streamId}`;
 
-        // Store in Redis for recent messages - with optimized storage
-        await storeMessage(messageKey, message);
+    //     // Store in Redis for recent messages - with optimized storage
+    //     await storeMessage(messageKey, message);
 
-        // For high-volume streams, use a pub/sub approach instead of room broadcasting
-        // This is more efficient for very large numbers of recipients
-        redisPubClient.publish(
-          `chat:${streamId}`,
-          JSON.stringify({
-            type: "new_message",
-            message,
-          })
-        );
+    //     // For high-volume streams, use a pub/sub approach instead of room broadcasting
+    //     // This is more efficient for very large numbers of recipients
+    //     redisPubClient.publish(
+    //       `chat:${streamId}`,
+    //       JSON.stringify({
+    //         type: "new_message",
+    //         message,
+    //       })
+    //     );
 
-        // Also emit to socket room for backward compatibility
-        socket.to(`stream:${streamId}`).emit("new_message", message);
+    //     // Also emit to socket room for backward compatibility
+    //     socket.to(`stream:${streamId}`).emit("new_message", message);
 
-        // Increment message count in stream metrics only if streamId is a valid ObjectId
-        if (isValidObjectId(streamId)) {
-          // Use a more efficient counter increment for high volume
-          await incrementMessageCounter(streamId);
-        }
-      } catch (error) {
-        console.error("Send message error:", error);
-        socket.emit("error", { message: "Failed to send message" });
-      }
-    });
+    //     // Increment message count in stream metrics only if streamId is a valid ObjectId
+    //     if (isValidObjectId(streamId)) {
+    //       // Use a more efficient counter increment for high volume
+    //       await incrementMessageCounter(streamId);
+    //     }
+    //   } catch (error) {
+    //     console.error("Send message error:", error);
+    //     socket.emit("error", { message: "Failed to send message" });
+    //   }
+    // });
+    // Handle chat messages
+socket.on("send_message", async ({ content, streamId, replyTo }) => {
+  try {
+    if (!content.trim() || !streamId) return;
+
+    // Check rate limiting - with enhanced feedback
+    const canSend = await checkRateLimit(socket.user.id, streamId);
+    if (!canSend) {
+      socket.emit("error", {
+        message:
+          "Rate limit exceeded. Please wait before sending more messages.",
+        code: "RATE_LIMIT",
+        retryAfter: 2, // Suggest retry after 2 seconds
+      });
+      return;
+    }
+
+    const messageId = `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    const timestamp = Date.now();
+
+    // CHANGE: Get the real username from socket.handshake.auth if available
+    const realUsername =
+      socket.handshake.auth.realUsername || socket.user.username;
+
+    // Create message object with real username
+    const message = {
+      id: messageId,
+      content,
+      streamId,
+      timestamp,
+      sender: {
+        id: socket.user.id,
+        username: realUsername, // CHANGE: Use real username instead of anonymous
+        profilePicture: socket.user.profilePicture,
+        isAnonymous: socket.user.isAnonymous,
+      },
+      replyTo: replyTo || null,
+    };
+
+    // For extremely high volume streams, use sharded message storage
+    // This helps distribute the load across Redis instances
+    const streamShard = getStreamShard(streamId);
+    const messageKey = `messages:${streamShard}:${streamId}`;
+
+    // Store in Redis for recent messages - with optimized storage
+    await storeMessage(messageKey, message);
+
+    // CHANGE: Broadcast to ALL clients, not just room members
+    // This ensures everyone gets the message regardless of room membership
+    io.emit("new_message", message);
+    
+    // Also use the pub/sub approach for redundancy
+    redisPubClient.publish(
+      `chat:${streamId}`,
+      JSON.stringify({
+        type: "new_message",
+        message,
+      })
+    );
+
+    // Increment message count in stream metrics only if streamId is a valid ObjectId
+    if (isValidObjectId(streamId)) {
+      // Use a more efficient counter increment for high volume
+      await incrementMessageCounter(streamId);
+    }
+  } catch (error) {
+    console.error("Send message error:", error);
+    socket.emit("error", { message: "Failed to send message" });
+  }
+});
 
     // Handle view mode change
     socket.on("change_view_mode", ({ streamId, mode }) => {
@@ -1036,7 +1106,6 @@ module.exports = async function setupSocketIO(server) {
       );
     }
   }
-
   // Function to check if messages need to be archived
   async function checkMessageArchiving(key) {
     // Get count of messages in this stream
@@ -1516,6 +1585,7 @@ module.exports = async function setupSocketIO(server) {
 
   return io;
 };
+
 // Export the io instance and the getCurrentCameraHolder function
 module.exports.io = io;
 module.exports.getCurrentCameraHolder = getCurrentCameraHolder;

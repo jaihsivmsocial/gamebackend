@@ -65,7 +65,8 @@ exports.sendChatMessage = async (req, res) => {
 
     // Generate anonymous user details
     const anonId = anonymousId || nanoid(10)
-    const username = anonymousName || "Anonymous"
+    // CHANGE: Prioritize the realUsername from socket.handshake.auth
+    const username = req.socket?.handshake?.auth?.realUsername || anonymousName || "Anonymous"
     const profilePicture = customProfilePicture || getDefaultAvatar(anonId, username)
 
     // Rate limiting
@@ -85,9 +86,9 @@ exports.sendChatMessage = async (req, res) => {
       timestamp,
       sender: {
         id: anonId,
-        username,
+        username, // CHANGE: This will now be the real username when available
         profilePicture,
-        isAnonymous: true,
+        isAnonymous: !req.socket?.handshake?.auth?.realUsername, // CHANGE: Set isAnonymous based on realUsername presence
       },
       replyTo: replyTo || null,
     }
@@ -110,7 +111,7 @@ exports.sendChatMessage = async (req, res) => {
         anonymousId: anonId,
         username,
         profilePicture,
-        isAnonymous: true,
+        isAnonymous: !req.socket?.handshake?.auth?.realUsername, // CHANGE: Set isAnonymous based on realUsername presence
       },
       replyTo: replyTo || undefined,
     })
@@ -118,8 +119,8 @@ exports.sendChatMessage = async (req, res) => {
 
     // Broadcast to all users in the stream via Socket.IO
     if (req.io) {
-      // Use a single room name for consistent broadcasting
-      req.io.to(`stream:${streamId}`).emit("new_message", message)
+      // CHANGE: Broadcast to ALL clients, not just room members
+      req.io.emit("new_message", message)
     }
 
     res.status(201).json({
