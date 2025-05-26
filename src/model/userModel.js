@@ -35,6 +35,9 @@ const UserSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+   DisplayName:{
+    type:String,
+   },
     otp: {
       type: String,
       required: false,

@@ -49,7 +49,7 @@ async function playfabRequest(endpoint, data, headers = {}) {
 
 exports.register = async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const { DisplayName, username, email, password } = req.body;
 
     // Standardize username to lowercase for consistent storage and lookup
     const standardizedUsername = username.toLowerCase();
@@ -72,6 +72,7 @@ exports.register = async (req, res) => {
       const playfabResponse = await playfabRequest('/Client/RegisterPlayFabUser', {
         TitleId: PLAYFAB_TITLE_ID,
         Username: standardizedUsername,
+        DisplayName:DisplayName,
         Email: email,
         Password: password, // PlayFab will handle password security
         RequireBothUsernameAndEmail: true
@@ -103,6 +104,7 @@ exports.register = async (req, res) => {
         user: {
           id: user._id,
           username: user.username,
+          DisplayName:DisplayName,
           email: user.email,
           profilePicture: user.profilePicture,
           playfabId: user.playfabId
