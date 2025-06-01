@@ -294,12 +294,12 @@ async function checkCameraHolderChanges() {
     // Store the current camera holder data
     currentCameraHolder = data[0];
     const currentCameraHolderName = data[0].CameraHolderName;
-    console.log(
-      "Current camera holder name:",
-      currentCameraHolderName,
-      "Last camera holder name:",
-      lastCameraHolderName
-    );
+    // console.log(
+    //   "Current camera holder name:",
+    //   currentCameraHolderName,
+    //   "Last camera holder name:",
+    //   lastCameraHolderName
+    // );
 
     // If camera holder changed from None/empty to a valid name, generate a question immediately
     if (

@@ -73,12 +73,12 @@ const BetQuestionSchema = new mongoose.Schema(
     },
     correctChoice:{
       type: String,
-      default: "",
+      default: null,
     },
     status: {
       type: String,
       enum: ["pending","ongoing","completed"],
-      default: "ongoing",
+      default: "pending",
     },
   },
   { timestamps: true },
