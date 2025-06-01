@@ -273,6 +273,8 @@ async function resolveQuestion(questionId) {
   } catch (error) {}
 }
 
+
+
 // Add this function to check for camera holder changes
 async function checkCameraHolderChanges() {
   try {
