@@ -1,27 +1,3 @@
-// const jwt = require("jsonwebtoken")
-// const User = require("../model/userModel")
-
-// const authenticate = async (req, res, next) => {
-//   try {
-//     // Check for token in multiple places
-//     let token
-
-//     // Check Authorization header
-//     const authHeader = req.headers.authorization
-//     if (authHeader && authHeader.startsWith("Bearer ")) {
-//       token = authHeader.split(" ")[1]
-//     }
-//     // Check cookies as fallback
-//     else if (req.cookies && req.cookies.authData) {
-//       try {
-//         const cookieData = JSON.parse(req.cookies.authData)
-//         token = cookieData.token
-//       } catch (e) {
-//         console.error("Error parsing cookie:", e)
-//       }
-//     }
-
-//     if (!token) {
 
 
 const jwt = require("jsonwebtoken")
