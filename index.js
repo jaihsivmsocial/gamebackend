@@ -76,8 +76,8 @@ app.use(
 )
 
 // Body parsing middleware
-app.use(express.json({ limit: "10mb" })) // Increased for video uploads
-app.use(express.urlencoded({ extended: true, limit: "10mb" }))
+app.use(express.json({ limit: "100mb" })) // Increased for video uploads
+app.use(express.urlencoded({ extended: true, limit: "100mb" }))
 
 // Initialize Socket.io
 let io
