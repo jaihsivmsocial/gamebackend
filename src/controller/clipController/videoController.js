@@ -19,7 +19,7 @@ try {
 
   console.log("S3 Client initialized successfully")
   console.log("AWS Region:", process.env.AWS_REGION)
-  console.log("AWS Bucket:", process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME)
+  console.log("AWS Bucket:", process.env.AWS_S3_BUCKET_NAME || process.env.AWS_S3_BUCKET_NAME)
 } catch (error) {
   console.error("Failed to initialize S3 client:", error)
 }
@@ -99,7 +99,7 @@ const generatePresignedUrl = async (req, res) => {
     const uniqueKey = `videos/${req.user.id}/${Date.now()}-${Math.random().toString(36).substring(2)}${fileExtension}`
 
     // Get bucket name with fallback
-    const bucketName = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
+    const bucketName = process.env.AWS_S3_BUCKET_NAME || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
 
     console.log("=== S3 CONFIGURATION ===")
     console.log("Bucket name:", bucketName)
@@ -208,7 +208,7 @@ const saveVideoAfterUpload = async (req, res) => {
     }
 
     // Use your exact bucket name and region
-    const bucketName = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
+    const bucketName = process.env.AWS_S3_BUCKET_NAME || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
     const region = process.env.AWS_REGION || "eu-north-1"
 
     // Construct the S3 URL
@@ -296,7 +296,7 @@ const uploadVideo = async (req, res) => {
     const uniqueKey = `videos/${req.user.id}/${Date.now()}-${Math.random().toString(36).substring(2)}${fileExtension}`
 
     // Use your exact bucket name and region
-    const bucketName = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
+    const bucketName = process.env.AWS_S3_BUCKET_NAME || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
     const region = process.env.AWS_REGION || "eu-north-1"
 
     // Upload to S3 (you'll need to implement uploadToS3 function)
