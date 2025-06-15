@@ -1,16 +1,74 @@
-// Complete production-ready video controller
+// Complete production-ready video controller with enhanced error handling
 
 const Video = require("../../model/clip/videoModel")
 const path = require("path")
-const { generatePresignedUrl: generateS3Url, deleteFromS3 } = require("../../config/aws")
+
+// Initialize S3 client with better error handling
+let s3Client
+try {
+  const { S3Client } = require("@aws-sdk/client-s3")
+  const { createPresignedPost } = require("@aws-sdk/s3-presigned-post")
+
+  s3Client = new S3Client({
+    region: process.env.AWS_REGION,
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    },
+  })
+
+  console.log("S3 Client initialized successfully")
+  console.log("AWS Region:", process.env.AWS_REGION)
+  console.log("AWS Bucket:", process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME)
+} catch (error) {
+  console.error("Failed to initialize S3 client:", error)
+}
 
 // Generate presigned URL for direct S3 upload
 const generatePresignedUrl = async (req, res) => {
   try {
+    console.log("=== PRESIGNED URL REQUEST ===")
+    console.log("Request body:", req.body)
+    console.log("User:", req.user ? { id: req.user.id, username: req.user.username } : "No user")
+
+    // Check if S3 client is initialized
+    if (!s3Client) {
+      console.error("S3 client not initialized")
+      return res.status(500).json({
+        success: false,
+        message: "S3 service not available",
+        error: "S3 client initialization failed",
+      })
+    }
+
+    // Check environment variables
+    const requiredEnvVars = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION"]
+    const missingEnvVars = requiredEnvVars.filter((envVar) => !process.env[envVar])
+
+    if (missingEnvVars.length > 0) {
+      console.error("Missing environment variables:", missingEnvVars)
+      return res.status(500).json({
+        success: false,
+        message: "Server configuration error",
+        error: `Missing environment variables: ${missingEnvVars.join(", ")}`,
+      })
+    }
+
+    // Check authentication
+    if (!req.user || !req.user.id) {
+      console.error("User not authenticated")
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+        error: "User not found in request",
+      })
+    }
+
     const { filename, contentType, fileSize } = req.body
 
     // Validation
     if (!filename || !contentType) {
+      console.error("Missing filename or contentType")
       return res.status(400).json({
         success: false,
         message: "Filename and content type are required",
@@ -19,6 +77,7 @@ const generatePresignedUrl = async (req, res) => {
 
     // Check file type
     if (!contentType.startsWith("video/")) {
+      console.error("Invalid content type:", contentType)
       return res.status(400).json({
         success: false,
         message: "Only video files are allowed",
@@ -28,6 +87,7 @@ const generatePresignedUrl = async (req, res) => {
     // Check file size (100MB limit)
     const maxSize = 100 * 1024 * 1024 // 100MB
     if (fileSize && fileSize > maxSize) {
+      console.error("File too large:", fileSize)
       return res.status(400).json({
         success: false,
         message: "File size too large. Maximum size is 100MB",
@@ -38,24 +98,26 @@ const generatePresignedUrl = async (req, res) => {
     const fileExtension = path.extname(filename)
     const uniqueKey = `videos/${req.user.id}/${Date.now()}-${Math.random().toString(36).substring(2)}${fileExtension}`
 
-    // Use createPresignedPost for proper POST upload
+    // Get bucket name with fallback
+    const bucketName = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
+
+    console.log("=== S3 CONFIGURATION ===")
+    console.log("Bucket name:", bucketName)
+    console.log("S3 Key:", uniqueKey)
+    console.log("Content Type:", contentType)
+    console.log("File size:", fileSize)
+    console.log("AWS Region:", process.env.AWS_REGION)
+
+    // Import createPresignedPost dynamically to catch import errors
     const { createPresignedPost } = require("@aws-sdk/s3-presigned-post")
-    const { S3Client } = require("@aws-sdk/client-s3")
 
-    const client = new S3Client({
-      region: process.env.AWS_REGION,
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-      },
-    })
-
-    const { url, fields } = await createPresignedPost(client, {
-      Bucket: process.env.AWS_S3_BUCKET_NAME,
+    const presignedPostData = await createPresignedPost(s3Client, {
+      Bucket: bucketName,
       Key: uniqueKey,
       Conditions: [
         ["content-length-range", 0, maxSize],
-        ["starts-with", "$Content-Type", contentType],
+        ["starts-with", "$Content-Type", "video/"],
+        ["eq", "$Content-Type", contentType],
       ],
       Fields: {
         "Content-Type": contentType,
@@ -63,15 +125,48 @@ const generatePresignedUrl = async (req, res) => {
       Expires: 3600, // 1 hour expiry
     })
 
+    console.log("=== PRESIGNED POST GENERATED ===")
+    console.log("URL:", presignedPostData.url)
+    console.log("Fields:", presignedPostData.fields)
+
     res.json({
       success: true,
-      url: url,
-      fields: fields,
+      url: presignedPostData.url,
+      fields: presignedPostData.fields,
       key: uniqueKey,
       expiresIn: 3600,
     })
   } catch (error) {
-    console.error("Generate presigned URL error:", error)
+    console.error("=== PRESIGNED URL ERROR ===")
+    console.error("Error type:", error.constructor.name)
+    console.error("Error message:", error.message)
+    console.error("Error stack:", error.stack)
+
+    // Check for specific AWS errors
+    if (error.name === "CredentialsProviderError") {
+      return res.status(500).json({
+        success: false,
+        message: "AWS credentials error",
+        error: "Invalid AWS credentials configuration",
+      })
+    }
+
+    if (error.name === "UnknownEndpoint") {
+      return res.status(500).json({
+        success: false,
+        message: "AWS region error",
+        error: "Invalid AWS region configuration",
+      })
+    }
+
+    if (error.message.includes("bucket")) {
+      return res.status(500).json({
+        success: false,
+        message: "S3 bucket error",
+        error: "Bucket access denied or does not exist",
+      })
+    }
+
     res.status(500).json({
       success: false,
       message: "Failed to generate upload URL",
@@ -83,6 +178,10 @@ const generatePresignedUrl = async (req, res) => {
 // Save video after direct S3 upload
 const saveVideoAfterUpload = async (req, res) => {
   try {
+    console.log("=== SAVE VIDEO REQUEST ===")
+    console.log("Request body:", req.body)
+    console.log("User:", req.user ? { id: req.user.id, username: req.user.username } : "No user")
+
     const { title, description, tags, s3Key, fileSize } = req.body
 
     // Validation
@@ -100,8 +199,25 @@ const saveVideoAfterUpload = async (req, res) => {
       })
     }
 
+    // Check authentication
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      })
+    }
+
+    // Use your exact bucket name and region
+    const bucketName = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
+    const region = process.env.AWS_REGION || "eu-north-1"
+
     // Construct the S3 URL
-    const videoUrl = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${s3Key}`
+    const videoUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${s3Key}`
+
+    console.log("=== VIDEO SAVE DATA ===")
+    console.log("Video URL:", videoUrl)
+    console.log("S3 Key:", s3Key)
+    console.log("Title:", title)
 
     // Create video record
     const video = new Video({
@@ -144,7 +260,8 @@ const saveVideoAfterUpload = async (req, res) => {
       },
     })
   } catch (error) {
-    console.error("Save video error:", error)
+    console.error("=== SAVE VIDEO ERROR ===")
+    console.error("Error:", error)
     res.status(500).json({
       success: false,
       message: "Failed to save video",
@@ -178,8 +295,12 @@ const uploadVideo = async (req, res) => {
     const fileExtension = path.extname(file.originalname)
     const uniqueKey = `videos/${req.user.id}/${Date.now()}-${Math.random().toString(36).substring(2)}${fileExtension}`
 
+    // Use your exact bucket name and region
+    const bucketName = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
+    const region = process.env.AWS_REGION || "eu-north-1"
+
     // Upload to S3 (you'll need to implement uploadToS3 function)
-    const videoUrl = `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${uniqueKey}`
+    const videoUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${uniqueKey}`
 
     // Create video record
     const video = new Video({
@@ -331,6 +452,7 @@ const getVideo = async (req, res) => {
     })
   }
 }
+
 // Get video metadata for rich sharing
 const getVideoMetadata = async (req, res) => {
   try {
