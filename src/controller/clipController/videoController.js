@@ -1,5 +1,5 @@
+// Complete production-ready video controller with enhanced error handling
 
-require('dotenv').config();
 const Video = require("../../model/clip/videoModel")
 const path = require("path")
 
@@ -465,8 +465,8 @@ const getVideoMetadata = async (req, res) => {
         message: "Video not found",
       })
     }
-    const baseUrl = "http://apitest.tribez.gg"
-    // const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:5000"
+
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://apitest.tribez.gg"
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
 
     // Generate thumbnail URL
@@ -479,6 +479,7 @@ const getVideoMetadata = async (req, res) => {
         description: video.description || `Watch this amazing video by @${video.username}`,
         imageUrl: thumbnailUrl,
         url: `${siteUrl}/video/${video._id}`,
+        playerUrl: `${siteUrl}/video/${video._id}/player`,
         type: "video.other",
         siteName: "Clip App",
         username: video.username,
@@ -486,6 +487,27 @@ const getVideoMetadata = async (req, res) => {
         likes: video.likes?.length || 0,
         createdAt: video.createdAt,
         videoUrl: video.videoUrl,
+        duration: video.duration || 30,
+
+        // Open Graph specific
+        "og:title": video.title,
+        "og:description": video.description || `Video by @${video.username}`,
+        "og:image": thumbnailUrl,
+        "og:video": video.videoUrl,
+        "og:video:type": "video/mp4",
+        "og:video:width": "720",
+        "og:video:height": "1280",
+        "og:url": `${siteUrl}/video/${video._id}`,
+        "og:site_name": "Clip App",
+
+        // Twitter Card specific
+        "twitter:card": "player",
+        "twitter:title": video.title,
+        "twitter:description": video.description || `Video by @${video.username}`,
+        "twitter:image": thumbnailUrl,
+        "twitter:player": `${siteUrl}/video/${video._id}/player`,
+        "twitter:player:width": "720",
+        "twitter:player:height": "1280",
       },
     })
   } catch (error) {
@@ -685,6 +707,7 @@ const deleteVideo = async (req, res) => {
       })
     }
 
+    // Check if user owns the video or is admin
     if (video.userId.toString() !== userId && req.user.role !== "admin") {
       return res.status(403).json({
         success: false,
@@ -695,6 +718,15 @@ const deleteVideo = async (req, res) => {
     // Soft delete (mark as inactive)
     video.isActive = false
     await video.save()
+
+    // Optional: Delete from S3 (uncomment if you want hard delete)
+    // if (video.videoKey) {
+    //   try {
+    //     await deleteFromS3(video.videoKey)
+    //   } catch (s3Error) {
+    //     console.error("Failed to delete from S3:", s3Error)
+    //   }
+    // }
 
     res.json({
       success: true,
