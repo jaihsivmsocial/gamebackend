@@ -19,7 +19,7 @@ try {
 
   console.log("S3 Client initialized successfully")
   console.log("AWS Region:", process.env.AWS_REGION)
-  console.log("AWS Bucket:", process.env.AWS_S3_BUCKET_NAME || process.env.AWS_S3_BUCKET_NAME)
+  console.log("AWS Bucket:", process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME)
 } catch (error) {
   console.error("Failed to initialize S3 client:", error)
 }
@@ -99,7 +99,7 @@ const generatePresignedUrl = async (req, res) => {
     const uniqueKey = `videos/${req.user.id}/${Date.now()}-${Math.random().toString(36).substring(2)}${fileExtension}`
 
     // Get bucket name with fallback
-    const bucketName = process.env.AWS_S3_BUCKET_NAME || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
+    const bucketName = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
 
     console.log("=== S3 CONFIGURATION ===")
     console.log("Bucket name:", bucketName)
@@ -208,7 +208,7 @@ const saveVideoAfterUpload = async (req, res) => {
     }
 
     // Use your exact bucket name and region
-    const bucketName = process.env.AWS_S3_BUCKET_NAME || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
+    const bucketName = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
     const region = process.env.AWS_REGION || "eu-north-1"
 
     // Construct the S3 URL
@@ -296,7 +296,7 @@ const uploadVideo = async (req, res) => {
     const uniqueKey = `videos/${req.user.id}/${Date.now()}-${Math.random().toString(36).substring(2)}${fileExtension}`
 
     // Use your exact bucket name and region
-    const bucketName = process.env.AWS_S3_BUCKET_NAME || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
+    const bucketName = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
     const region = process.env.AWS_REGION || "eu-north-1"
 
     // Upload to S3 (you'll need to implement uploadToS3 function)
@@ -471,44 +471,96 @@ const getVideoMetadata = async (req, res) => {
 
     // Generate thumbnail URL
     const thumbnailUrl = video.thumbnailUrl || `${baseUrl}/api/videos/${video._id}/thumbnail`
+    const videoPageUrl = `${siteUrl}/video/${video._id}`
+    const playerUrl = `${siteUrl}/video/${video._id}/player`
+
+    const metadata = {
+      // Basic info
+      title: video.title,
+      description: video.description || `Watch this amazing video by @${video.username}`,
+      url: videoPageUrl,
+      playerUrl: playerUrl,
+      imageUrl: thumbnailUrl,
+      videoUrl: video.videoUrl,
+
+      // Video details
+      duration: video.duration || 30,
+      views: video.views || 0,
+      likes: video.likes?.length || 0,
+      username: video.username,
+      createdAt: video.createdAt,
+      tags: video.tags || [],
+
+      // Platform specific metadata
+      siteName: "Clip App",
+      type: "video.other",
+
+      // Open Graph specific
+      "og:title": video.title,
+      "og:description": video.description || `Video by @${video.username}`,
+      "og:image": thumbnailUrl,
+      "og:image:width": "1200",
+      "og:image:height": "630",
+      "og:video": video.videoUrl,
+      "og:video:secure_url": video.videoUrl,
+      "og:video:type": "video/mp4",
+      "og:video:width": "720",
+      "og:video:height": "1280",
+      "og:url": videoPageUrl,
+      "og:site_name": "Clip App",
+      "og:type": "video.other",
+      "og:locale": "en_US",
+
+      // Twitter Card specific
+      "twitter:card": "player",
+      "twitter:site": "@ClipApp",
+      "twitter:creator": `@${video.username}`,
+      "twitter:title": video.title,
+      "twitter:description": video.description || `Video by @${video.username}`,
+      "twitter:image": thumbnailUrl,
+      "twitter:player": playerUrl,
+      "twitter:player:width": "720",
+      "twitter:player:height": "1280",
+      "twitter:player:stream": video.videoUrl,
+
+      // Schema.org structured data
+      structuredData: {
+        "@context": "https://schema.org",
+        "@type": "VideoObject",
+        name: video.title,
+        description: video.description || `Video by @${video.username}`,
+        thumbnailUrl: thumbnailUrl,
+        uploadDate: video.createdAt,
+        duration: `PT${video.duration || 30}S`,
+        contentUrl: video.videoUrl,
+        embedUrl: playerUrl,
+        author: {
+          "@type": "Person",
+          name: video.username,
+        },
+        publisher: {
+          "@type": "Organization",
+          name: "Clip App",
+          url: siteUrl,
+        },
+        interactionStatistic: [
+          {
+            "@type": "InteractionCounter",
+            interactionType: "https://schema.org/WatchAction",
+            userInteractionCount: video.views || 0,
+          },
+          {
+            "@type": "InteractionCounter",
+            interactionType: "https://schema.org/LikeAction",
+            userInteractionCount: video.likes?.length || 0,
+          },
+        ],
+      },
+    }
 
     res.json({
       success: true,
-      metadata: {
-        title: video.title,
-        description: video.description || `Watch this amazing video by @${video.username}`,
-        imageUrl: thumbnailUrl,
-        url: `${siteUrl}/video/${video._id}`,
-        playerUrl: `${siteUrl}/video/${video._id}/player`,
-        type: "video.other",
-        siteName: "Clip App",
-        username: video.username,
-        views: video.views || 0,
-        likes: video.likes?.length || 0,
-        createdAt: video.createdAt,
-        videoUrl: video.videoUrl,
-        duration: video.duration || 30,
-
-        // Open Graph specific
-        "og:title": video.title,
-        "og:description": video.description || `Video by @${video.username}`,
-        "og:image": thumbnailUrl,
-        "og:video": video.videoUrl,
-        "og:video:type": "video/mp4",
-        "og:video:width": "720",
-        "og:video:height": "1280",
-        "og:url": `${siteUrl}/video/${video._id}`,
-        "og:site_name": "Clip App",
-
-        // Twitter Card specific
-        "twitter:card": "player",
-        "twitter:title": video.title,
-        "twitter:description": video.description || `Video by @${video.username}`,
-        "twitter:image": thumbnailUrl,
-        "twitter:player": `${siteUrl}/video/${video._id}/player`,
-        "twitter:player:width": "720",
-        "twitter:player:height": "1280",
-      },
+      metadata: metadata,
     })
   } catch (error) {
     console.error("Get video metadata error:", error)
