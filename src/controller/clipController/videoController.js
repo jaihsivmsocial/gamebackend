@@ -685,7 +685,6 @@ const deleteVideo = async (req, res) => {
       })
     }
 
-    // Check if user owns the video or is admin
     if (video.userId.toString() !== userId && req.user.role !== "admin") {
       return res.status(403).json({
         success: false,
@@ -696,15 +695,6 @@ const deleteVideo = async (req, res) => {
     // Soft delete (mark as inactive)
     video.isActive = false
     await video.save()
-
-    // Optional: Delete from S3 (uncomment if you want hard delete)
-    // if (video.videoKey) {
-    //   try {
-    //     await deleteFromS3(video.videoKey)
-    //   } catch (s3Error) {
-    //     console.error("Failed to delete from S3:", s3Error)
-    //   }
-    // }
 
     res.json({
       success: true,
