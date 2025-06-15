@@ -1,5 +1,5 @@
-// Complete production-ready video controller with enhanced error handling
 
+require('dotenv').config();
 const Video = require("../../model/clip/videoModel")
 const path = require("path")
 
