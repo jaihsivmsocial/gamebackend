@@ -331,7 +331,6 @@ const getVideo = async (req, res) => {
     })
   }
 }
-
 // Get video metadata for rich sharing
 const getVideoMetadata = async (req, res) => {
   try {
