@@ -72,19 +72,39 @@ const deleteFromS3 = async (key) => {
   }
 }
 
-const generatePresignedUrl = async (key, expiresIn = 3600) => {
-  const params = {
-    Bucket: process.env.AWS_S3_BUCKET_NAME,
-    Key: key,
-    Expires: expiresIn,
-  }
-
+const generatePresignedUrl = async (key, contentType, expiresIn = 3600) => {
   try {
-    const url = await s3.getSignedUrlPromise("getObject", params)
-    return url
+    console.log("🔗 Generating presigned URL with params:")
+    console.log("- Key:", key)
+    console.log("- ContentType:", contentType)
+    console.log("- ExpiresIn (before):", expiresIn, typeof expiresIn)
+
+    // ✅ FIX: Ensure expiresIn is a NUMBER
+    const expirationSeconds = Number(expiresIn)
+    console.log("- ExpiresIn (after):", expirationSeconds, typeof expirationSeconds)
+
+    // Validate required environment variables
+    if (!process.env.AWS_S3_BUCKET_NAME) {
+      throw new Error("AWS_S3_BUCKET environment variable is required")
+    }
+
+    const params = {
+      Bucket: process.env.AWS_S3_BUCKET_NAME,
+      Key: key,
+      ContentType: contentType,
+      Expires: expirationSeconds, // ✅ Now it's definitely a number
+      ACL: "public-read",
+    }
+
+    console.log("📋 S3 params:", params)
+
+    const uploadUrl = await s3.getSignedUrlPromise("putObject", params)
+
+    console.log("✅ Presigned URL generated successfully")
+    return uploadUrl
   } catch (error) {
-    console.error("Presigned URL generation error:", error)
-    throw new Error("Failed to generate download URL")
+    console.error("❌ Error generating presigned URL:", error)
+    throw error
   }
 }
 

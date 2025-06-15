@@ -10,6 +10,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@aws-sdk/s3-presigned-post": "^3.828.0",
     "@socket.io/redis-adapter": "^8.3.0",
     "aws-sdk": "^2.1692.0",
     "axios": "^1.9.0",
