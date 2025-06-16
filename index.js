@@ -63,7 +63,7 @@ app.use(
         process.env.FRONTEND_URL || "http://localhost:3000",
         "https://test.tribez.gg",
         "https://www.test.tribez.gg",
-        "http://13.48.129.159",
+        "https://13.48.129.159",
       ]
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, origin || "*")
