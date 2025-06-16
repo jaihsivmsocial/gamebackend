@@ -144,6 +144,9 @@ process.on("SIGINT", () => {
   server.close(() => process.exit(0))
 })
 
+
+
+
 process.on("SIGTERM", () => {
   console.log("Shutting down server...")
   server.close(() => process.exit(0))
