@@ -242,6 +242,7 @@ const saveVideoAfterUpload = async (req, res) => {
     console.log(`Video saved to database: ${video._id}`)
 
     // Generate basic thumbnail URL (optional - can be generated later)
+    // This thumbnailUrl should ideally be a direct S3 URL to an actual thumbnail image
     const thumbnailUrl = `${process.env.NEXT_PUBLIC_BASE_URL || "http://apitest.tribez.gg"}/api/videos/${video._id}/thumbnail`
 
     res.status(201).json({
@@ -252,7 +253,7 @@ const saveVideoAfterUpload = async (req, res) => {
         title: video.title,
         description: video.description,
         videoUrl: video.videoUrl,
-        thumbnailUrl: thumbnailUrl,
+        thumbnailUrl: thumbnailUrl, // Ensure this is a direct, publicly accessible URL to an image
         username: video.username,
         views: video.views,
         likes: video.likes,
@@ -469,12 +470,13 @@ const getVideoMetadata = async (req, res) => {
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://apitest.tribez.gg"
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
 
-    // Generate thumbnail URL - ensure this is a direct, publicly accessible image URL
-    const thumbnailUrl = video.thumbnailUrl // Assume this is the correct, publicly accessible URL
+    // Use the video's actual thumbnail URL from the database
+    const thumbnailUrl = video.thumbnailUrl
     const videoPageUrl = `${siteUrl}/video/${video._id}`
     const playerUrl = `${siteUrl}/video/${video._id}/player`
 
-    const videoContentUrl = video.videoUrl // Assume this is the correct, publicly accessible URL
+    // Use the video's actual video URL from the database
+    const videoContentUrl = video.videoUrl
 
     const metadata = {
       // Basic info
@@ -483,7 +485,7 @@ const getVideoMetadata = async (req, res) => {
       url: videoPageUrl,
       playerUrl: playerUrl,
       imageUrl: thumbnailUrl,
-      videoUrl: videoContentUrl, // Ensure this is a direct, publicly accessible video URL
+      videoUrl: videoContentUrl,
 
       // Video details
       duration: video.duration || 30,
@@ -503,10 +505,10 @@ const getVideoMetadata = async (req, res) => {
       "og:image": thumbnailUrl,
       "og:image:width": "1200",
       "og:image:height": "630",
-      "og:image:type": "image/jpeg", // Explicitly set image type
+      "og:image:type": "image/jpeg", // IMPORTANT: Ensure this matches the actual type of your thumbnails
       "og:video": videoContentUrl,
       "og:video:secure_url": videoContentUrl,
-      "og:video:type": "video/mp4",
+      "og:video:type": "video/mp4", // IMPORTANT: Ensure this matches the actual type of your videos
       "og:video:width": "720",
       "og:video:height": "1280",
       "og:url": videoPageUrl,
@@ -589,6 +591,7 @@ const getVideoThumbnail = async (req, res) => {
     }
 
     // Redirect to the actual thumbnail URL stored in the database
+    // This URL MUST be a direct link to an image file (e.g., an S3 public URL)
     res.redirect(302, video.thumbnailUrl)
   } catch (error) {
     console.error("Get video thumbnail error:", error)
