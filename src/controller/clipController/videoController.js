@@ -469,10 +469,12 @@ const getVideoMetadata = async (req, res) => {
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://apitest.tribez.gg"
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
 
-    // Generate thumbnail URL
-    const thumbnailUrl = video.thumbnailUrl || `${baseUrl}/api/videos/${video._id}/thumbnail`
+    // Generate thumbnail URL - ensure this is a direct, publicly accessible image URL
+    const thumbnailUrl = video.thumbnailUrl // Assume this is the correct, publicly accessible URL
     const videoPageUrl = `${siteUrl}/video/${video._id}`
     const playerUrl = `${siteUrl}/video/${video._id}/player`
+
+    const videoContentUrl = video.videoUrl // Assume this is the correct, publicly accessible URL
 
     const metadata = {
       // Basic info
@@ -481,7 +483,7 @@ const getVideoMetadata = async (req, res) => {
       url: videoPageUrl,
       playerUrl: playerUrl,
       imageUrl: thumbnailUrl,
-      videoUrl: video.videoUrl,
+      videoUrl: videoContentUrl, // Ensure this is a direct, publicly accessible video URL
 
       // Video details
       duration: video.duration || 30,
@@ -501,8 +503,9 @@ const getVideoMetadata = async (req, res) => {
       "og:image": thumbnailUrl,
       "og:image:width": "1200",
       "og:image:height": "630",
-      "og:video": video.videoUrl,
-      "og:video:secure_url": video.videoUrl,
+      "og:image:type": "image/jpeg", // Explicitly set image type
+      "og:video": videoContentUrl,
+      "og:video:secure_url": videoContentUrl,
       "og:video:type": "video/mp4",
       "og:video:width": "720",
       "og:video:height": "1280",
@@ -521,7 +524,7 @@ const getVideoMetadata = async (req, res) => {
       "twitter:player": playerUrl,
       "twitter:player:width": "720",
       "twitter:player:height": "1280",
-      "twitter:player:stream": video.videoUrl,
+      "twitter:player:stream": videoContentUrl,
 
       // Schema.org structured data
       structuredData: {
@@ -532,7 +535,7 @@ const getVideoMetadata = async (req, res) => {
         thumbnailUrl: thumbnailUrl,
         uploadDate: video.createdAt,
         duration: `PT${video.duration || 30}S`,
-        contentUrl: video.videoUrl,
+        contentUrl: videoContentUrl,
         embedUrl: playerUrl,
         author: {
           "@type": "Person",
@@ -577,16 +580,16 @@ const getVideoThumbnail = async (req, res) => {
     const { id } = req.params
     const video = await Video.findById(id)
 
-    if (!video || !video.isActive) {
+    if (!video || !video.isActive || !video.thumbnailUrl) {
+      // If video not found, inactive, or no thumbnail URL, return 404
       return res.status(404).json({
         success: false,
-        message: "Video not found",
+        message: "Video thumbnail not found or not available",
       })
     }
 
-    // For now, redirect to a placeholder or return video URL
-    // In production, you'd generate actual thumbnails
-    res.redirect(`/placeholder.svg?height=360&width=640&query=video-thumbnail`)
+    // Redirect to the actual thumbnail URL stored in the database
+    res.redirect(302, video.thumbnailUrl)
   } catch (error) {
     console.error("Get video thumbnail error:", error)
     res.status(500).json({
