@@ -214,6 +214,10 @@ const saveVideoAfterUpload = async (req, res) => {
     // Construct the S3 URL
     const videoUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${s3Key}`
 
+    // For thumbnailUrl, if a dedicated one isn't provided, use the videoUrl itself as a fallback.
+    // Ideally, a separate thumbnail image would be generated and uploaded to S3.
+    const thumbnailUrl = videoUrl // Use the video's direct URL as the thumbnail URL for now
+
     console.log("=== VIDEO SAVE DATA ===")
     console.log("Video URL:", videoUrl)
     console.log("S3 Key:", s3Key)
@@ -235,6 +239,7 @@ const saveVideoAfterUpload = async (req, res) => {
       comments: [],
       shares: 0,
       downloads: 0,
+      thumbnailUrl: thumbnailUrl,
     })
 
     // Save the video
@@ -243,7 +248,7 @@ const saveVideoAfterUpload = async (req, res) => {
 
     // Generate basic thumbnail URL (optional - can be generated later)
     // This thumbnailUrl should ideally be a direct S3 URL to an actual thumbnail image
-    const thumbnailUrl = `${process.env.NEXT_PUBLIC_BASE_URL || "http://apitest.tribez.gg"}/api/videos/${video._id}/thumbnail`
+    // const thumbnailUrl = `${process.env.NEXT_PUBLIC_BASE_URL || "http://apitest.tribez.gg"}/api/videos/${video._id}/thumbnail`
 
     res.status(201).json({
       success: true,
@@ -467,8 +472,8 @@ const getVideoMetadata = async (req, res) => {
       })
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://apitest.tribez.gg"
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://apitest.tribez.gg"
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://test.tribez.gg/"
 
     // Use the video's actual thumbnail URL from the database
     const thumbnailUrl = video.thumbnailUrl
