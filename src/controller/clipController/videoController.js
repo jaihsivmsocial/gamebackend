@@ -433,6 +433,10 @@ const getTrendingVideos = async (req, res) => {
 const getVideo = async (req, res) => {
   try {
     const { id } = req.params
+    const userId = req.user ? req.user.id : null // Get userId if authenticated
+    const userIp = req.ip || req.headers["x-forwarded-for"] || "unknown" // Get IP address
+    const isSharedLinkClick = req.query.source === "share" // Check for shared link source
+
     const video = await Video.findById(id)
 
     if (!video || !video.isActive) {
@@ -442,8 +446,38 @@ const getVideo = async (req, res) => {
       })
     }
 
-    // Increment view count
+    // Increment view count (existing logic)
     video.views = (video.views || 0) + 1
+
+    // Track unique views (existing logic)
+    let alreadyViewed = false
+    if (userId) {
+      alreadyViewed = video.uniqueViews.some((entry) => entry.userId && entry.userId.equals(userId))
+    } else {
+      alreadyViewed = video.uniqueViews.some((entry) => entry.ip === userIp)
+    }
+
+    if (!alreadyViewed) {
+      video.uniqueViews.push({ userId: userId, ip: userIp, viewedAt: new Date() })
+    }
+
+    // NEW: Track link clicks if from a shared source
+    if (isSharedLinkClick) {
+      video.linkClicks = (video.linkClicks || 0) + 1 // Increment total link clicks
+
+      // Track unique link clicks
+      let alreadyClicked = false
+      if (userId) {
+        alreadyClicked = video.uniqueLinkClicks.some((entry) => entry.userId && entry.userId.equals(userId))
+      } else {
+        alreadyClicked = video.uniqueLinkClicks.some((entry) => entry.ip === userIp)
+      }
+
+      if (!alreadyClicked) {
+        video.uniqueLinkClicks.push({ userId: userId, ip: userIp, clickedAt: new Date() })
+      }
+    }
+
     await video.save()
 
     res.json({
@@ -472,8 +506,8 @@ const getVideoMetadata = async (req, res) => {
       })
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://apitest.tribez.gg"
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://test.tribez.gg/"
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://apitest.tribez.gg"
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
 
     // Use the video's actual thumbnail URL from the database
     const thumbnailUrl = video.thumbnailUrl
@@ -700,6 +734,8 @@ const addComment = async (req, res) => {
 const incrementShare = async (req, res) => {
   try {
     const { id } = req.params
+    const userId = req.user ? req.user.id : null // Get userId if authenticated
+    const userIp = req.ip || req.headers["x-forwarded-for"] || "unknown" // Get IP address
 
     const video = await Video.findById(id)
     if (!video || !video.isActive) {
@@ -709,12 +745,26 @@ const incrementShare = async (req, res) => {
       })
     }
 
-    video.shares = (video.shares || 0) + 1
+    video.shares = (video.shares || 0) + 1 // Increment total share actions
+
+    // Track unique sharers
+    let alreadyShared = false
+    if (userId) {
+      alreadyShared = video.sharedBy.some((entry) => entry.userId && entry.userId.equals(userId))
+    } else {
+      alreadyShared = video.sharedBy.some((entry) => entry.ip === userIp)
+    }
+
+    if (!alreadyShared) {
+      video.sharedBy.push({ userId: userId, ip: userIp, sharedAt: new Date() })
+    }
+
     await video.save()
 
     res.json({
       success: true,
       shares: video.shares,
+      uniqueSharers: video.sharedBy.length, // Return the count of unique sharers
     })
   } catch (error) {
     console.error("Increment share error:", error)
