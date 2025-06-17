@@ -862,15 +862,12 @@ module.exports = {
 
   // Traditional upload (ADDED)
   uploadVideo,
-
   // Video CRUD
   getVideos,
   getVideo,
   deleteVideo, // ADDED
-
   // Trending & Discovery (ADDED)
   getTrendingVideos,
-
   // Metadata & Sharing
   getVideoMetadata,
   getVideoThumbnail,
