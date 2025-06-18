@@ -235,15 +235,14 @@ const saveVideoAfterUpload = async (req, res) => {
       tags: tags ? tags.split(",").map((tag) => tag.trim().toLowerCase()) : [],
       isActive: true,
       views: 0,
-      likes: [],
-      comments: [],
+      likes: [], // Initialize as empty array for Mongoose
+      comments: [], // Initialize as empty array for Mongoose
       shares: 0,
       downloads: 0,
       thumbnailUrl: thumbnailUrl,
-      // Initialize new fields
-      sharedBy: [],
-      linkClicks: 0,
-      uniqueLinkClicks: [],
+      sharedBy: [], // Initialize new field
+      linkClicks: 0, // Initialize new field
+      uniqueLinkClicks: [], // Initialize new field
     })
 
     // Save the video
@@ -320,8 +319,8 @@ const uploadVideo = async (req, res) => {
       tags: tags ? tags.split(",").map((tag) => tag.trim().toLowerCase()) : [],
       isActive: true,
       views: 0,
-      likes: [],
-      comments: [],
+      likes: [], // Initialize as empty array for Mongoose
+      comments: [], // Initialize as empty array for Mongoose
       shares: 0,
       downloads: 0,
       // Initialize new fields
@@ -437,14 +436,12 @@ const getTrendingVideos = async (req, res) => {
 const getVideo = async (req, res) => {
   try {
     const { id } = req.params
-    const userId = req.user ? req.user.id : null // Get userId if authenticated
-    // Use req.ip for a more direct IP, or fall back to headers
+    const userId = req.user ? req.user.id : null
     const userIp = req.ip || req.headers["x-forwarded-for"]?.split(",").shift() || "unknown"
-    const isSharedLinkClick = req.query.source === "share" // Check for shared link source
+    const isSharedLinkClick = req.query.source === "share"
 
-    console.log(
-      `[getVideo] Request for video ID: ${id}, User ID: ${userId}, IP: ${userIp}, Shared Link Click: ${isSharedLinkClick}`,
-    )
+    console.log(`[getVideo] Request for video ID: ${id}`)
+    console.log(`[getVideo] User ID: ${userId}, IP: ${userIp}, Shared Link Click: ${isSharedLinkClick}`)
 
     const video = await Video.findById(id)
 
@@ -456,11 +453,14 @@ const getVideo = async (req, res) => {
       })
     }
 
-    // Increment view count (existing logic)
-    video.views = (video.views || 0) + 1
-    console.log(`[getVideo] Video ID ${id} views incremented to: ${video.views}`)
+    console.log(`[getVideo] Video state BEFORE update:
+      Views: ${video.views}, Unique Views: ${video.uniqueViews.length},
+      Link Clicks: ${video.linkClicks}, Unique Link Clicks: ${video.uniqueLinkClicks.length}`)
 
-    // Track unique views (existing logic)
+    // Increment view count
+    video.views = (video.views || 0) + 1
+
+    // Track unique views
     let alreadyViewed = false
     if (userId) {
       alreadyViewed = video.uniqueViews.some((entry) => entry.userId && entry.userId.equals(userId))
@@ -470,7 +470,7 @@ const getVideo = async (req, res) => {
 
     if (!alreadyViewed) {
       video.uniqueViews.push({ userId: userId, ip: userIp, viewedAt: new Date() })
-      console.log(`[getVideo] Video ID ${id} unique view added. Total unique views: ${video.uniqueViews.length}`)
+      console.log(`[getVideo] Unique view added for video ID ${id}.`)
     } else {
       console.log(`[getVideo] Video ID ${id} already viewed by this user/IP.`)
     }
@@ -478,7 +478,7 @@ const getVideo = async (req, res) => {
     // NEW: Track link clicks if from a shared source
     if (isSharedLinkClick) {
       video.linkClicks = (video.linkClicks || 0) + 1 // Increment total link clicks
-      console.log(`[getVideo] Video ID ${id} linkClicks incremented to: ${video.linkClicks}`)
+      console.log(`[getVideo] Link click incremented for video ID ${id}.`)
 
       // Track unique link clicks
       let alreadyClicked = false
@@ -490,16 +490,17 @@ const getVideo = async (req, res) => {
 
       if (!alreadyClicked) {
         video.uniqueLinkClicks.push({ userId: userId, ip: userIp, clickedAt: new Date() })
-        console.log(
-          `[getVideo] Video ID ${id} unique link click added. Total unique link clicks: ${video.uniqueLinkClicks.length}`,
-        )
+        console.log(`[getVideo] Unique link click added for video ID ${id}.`)
       } else {
         console.log(`[getVideo] Video ID ${id} already clicked by this user/IP.`)
       }
     }
 
-    await video.save()
+    await video.save() // Save all changes
     console.log(`[getVideo] Video ID ${id} saved successfully after updates.`)
+    console.log(`[getVideo] Video state AFTER update:
+      Views: ${video.views}, Unique Views: ${video.uniqueViews.length},
+      Link Clicks: ${video.linkClicks}, Unique Link Clicks: ${video.uniqueLinkClicks.length}`)
 
     res.json({
       success: true,
@@ -576,7 +577,7 @@ const getVideoMetadata = async (req, res) => {
       "og:type": "video.other",
       "og:locale": "en_US",
 
-      // Twitter Card specific
+      // Twitter Card
       "twitter:card": "player",
       "twitter:site": "@ClipApp",
       "twitter:creator": `@${video.username}`,
@@ -676,7 +677,7 @@ const toggleLike = async (req, res) => {
       })
     }
 
-    const likeIndex = video.likes.indexOf(userId)
+    const likeIndex = video.likes.findIndex((like) => like.userId && like.userId.equals(userId)) // Use findIndex for array of objects
     let isLiked = false
 
     if (likeIndex > -1) {
@@ -684,7 +685,7 @@ const toggleLike = async (req, res) => {
       video.likes.splice(likeIndex, 1)
     } else {
       // Like
-      video.likes.push(userId)
+      video.likes.push({ userId: userId, createdAt: new Date() }) // Push object
       isLiked = true
     }
 
@@ -755,10 +756,11 @@ const addComment = async (req, res) => {
 const incrementShare = async (req, res) => {
   try {
     const { id } = req.params
-    const userId = req.user ? req.user.id : null // Get userId if authenticated
-    const userIp = req.ip || req.headers["x-forwarded-for"]?.split(",").shift() || "unknown" // Get IP address
+    const userId = req.user ? req.user.id : null
+    const userIp = req.ip || req.headers["x-forwarded-for"]?.split(",").shift() || "unknown"
 
-    console.log(`[incrementShare] Request for video ID: ${id}, User ID: ${userId}, IP: ${userIp}`)
+    console.log(`[incrementShare] Request for video ID: ${id}`)
+    console.log(`[incrementShare] User ID: ${userId}, IP: ${userIp}`)
 
     const video = await Video.findById(id)
     if (!video || !video.isActive) {
@@ -769,8 +771,10 @@ const incrementShare = async (req, res) => {
       })
     }
 
+    console.log(`[incrementShare] Video state BEFORE update:
+      Shares: ${video.shares}, Shared By: ${video.sharedBy.length}`)
+
     video.shares = (video.shares || 0) + 1 // Increment total share actions
-    console.log(`[incrementShare] Video ID ${id} total shares incremented to: ${video.shares}`)
 
     // Track unique sharers
     let alreadyShared = false
@@ -782,18 +786,20 @@ const incrementShare = async (req, res) => {
 
     if (!alreadyShared) {
       video.sharedBy.push({ userId: userId, ip: userIp, sharedAt: new Date() })
-      console.log(`[incrementShare] Video ID ${id} unique sharer added. Total unique sharers: ${video.sharedBy.length}`)
+      console.log(`[incrementShare] Unique sharer added for video ID ${id}.`)
     } else {
       console.log(`[incrementShare] Video ID ${id} already shared by this user/IP.`)
     }
 
     await video.save()
     console.log(`[incrementShare] Video ID ${id} saved successfully after updates.`)
+    console.log(`[incrementShare] Video state AFTER update:
+      Shares: ${video.shares}, Shared By: ${video.sharedBy.length}`)
 
     res.json({
       success: true,
       shares: video.shares,
-      uniqueSharers: video.sharedBy.length, // Return the count of unique sharers
+      uniqueSharers: video.sharedBy.length,
     })
   } catch (error) {
     console.error("[incrementShare] Error incrementing share:", error)

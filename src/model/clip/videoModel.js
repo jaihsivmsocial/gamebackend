@@ -64,6 +64,7 @@ const videoSchema = new mongoose.Schema(
         },
       },
     ],
+    // CORRECTED: Likes is an array of objects
     likes: [
       {
         userId: {
@@ -77,6 +78,7 @@ const videoSchema = new mongoose.Schema(
         },
       },
     ],
+    // CORRECTED: Comments is an array of objects
     comments: [
       {
         userId: {
