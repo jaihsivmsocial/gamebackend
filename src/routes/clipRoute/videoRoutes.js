@@ -12,9 +12,9 @@ const {
   getTrendingVideos,
   getVideoThumbnail,
   getVideoMetadata,
-  // Add these new imports
   generatePresignedUrl,
   saveVideoAfterUpload,
+  incrementView, // Keep this import for view increment
 } = require("./../../controller/clipController/videoController")
 const authenticate = require("../../middleware/authMiddleware")
 const {
@@ -27,7 +27,7 @@ const {
 
 const router = express.Router()
 
-// Configure multer with better error handling
+// Configure multer for video uploads
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -35,45 +35,33 @@ const upload = multer({
     files: 1,
   },
   fileFilter: (req, file, cb) => {
-    // Check file type
     if (!file.mimetype.startsWith("video/")) {
       return cb(new Error("Only video files are allowed"), false)
     }
-
-    // Check file extension
     const allowedExtensions = [".mp4", ".mov", ".avi", ".mkv", ".webm"]
     const fileExtension = file.originalname.toLowerCase().substring(file.originalname.lastIndexOf("."))
-
     if (!allowedExtensions.includes(fileExtension)) {
       return cb(new Error("Invalid file extension"), false)
     }
-
     cb(null, true)
   },
 })
 
-// ===== SPECIFIC ROUTES FIRST (BEFORE /:id) =====
+// ===== API Routes =====
 
-// Public specific routes
+// Public routes
 router.get("/get", validateQuery(paginationSchema), getVideos)
 router.get("/trending", getTrendingVideos)
-
-// Protected specific routes - NEW: Direct S3 upload routes
-router.post("/upload-url", authenticate, generatePresignedUrl) // Generate presigned URL
-router.post("/save", authenticate, saveVideoAfterUpload) // Save after S3 upload
-
-// Protected specific routes - EXISTING
-router.post("/upload", authenticate, upload.single("video"), validateRequest(videoUploadSchema), uploadVideo)
-
-// ===== PARAMETERIZED ROUTES LAST (AFTER SPECIFIC ROUTES) =====
-
-// Public parameterized routes
-router.get("/:id", getVideo) // This should be AFTER specific routes
+router.get("/:id", getVideo)
 router.post("/:id/share", incrementShare)
 router.get("/:id/thumbnail", getVideoThumbnail)
 router.get("/:id/metadata", getVideoMetadata)
+router.post("/:id/view", incrementView) // Essential for dynamic view count
 
-// Protected parameterized routes
+// Protected routes (require authentication)
+router.post("/upload-url", authenticate, generatePresignedUrl)
+router.post("/save", authenticate, saveVideoAfterUpload)
+router.post("/upload", authenticate, upload.single("video"), validateRequest(videoUploadSchema), uploadVideo)
 router.post("/:id/like", authenticate, toggleLike)
 router.post("/:id/comment", authenticate, validateRequest(commentSchema), addComment)
 router.get("/:id/download", getDownloadUrl)
