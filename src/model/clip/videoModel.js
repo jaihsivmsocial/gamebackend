@@ -108,11 +108,45 @@ const videoSchema = new mongoose.Schema(
       default: 0,
       min: [0, "Shares cannot be negative"],
     },
+    // NEW: Field to track unique users who initiated a share action
+    sharedBy: [
+      {
+        userId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+        ip: String, // Store IP for unauthenticated shares
+        sharedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
     downloads: {
       type: Number,
       default: 0,
       min: [0, "Downloads cannot be negative"],
     },
+    // NEW: Field for total link clicks from shared links
+    linkClicks: {
+      type: Number,
+      default: 0,
+      min: [0, "Link clicks cannot be negative"],
+    },
+    // NEW: Field to track unique clicks on shared links
+    uniqueLinkClicks: [
+      {
+        userId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+        ip: String, // Store IP for unauthenticated clicks
+        clickedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
     isActive: {
       type: Boolean,
       default: true,
@@ -149,23 +183,23 @@ const videoSchema = new mongoose.Schema(
         type: Number,
         default: 0,
       },
-          ogMetadata: {
-      title: {
-        type: String,
-        trim: true,
+      ogMetadata: {
+        title: {
+          type: String,
+          trim: true,
+        },
+        description: {
+          type: String,
+          trim: true,
+        },
+        imageUrl: {
+          type: String,
+        },
+        lastGenerated: {
+          type: Date,
+          default: Date.now,
+        },
       },
-      description: {
-        type: String,
-        trim: true,
-      },
-      imageUrl: {
-        type: String,
-      },
-      lastGenerated: {
-        type: Date,
-        default: Date.now,
-      },
-    },
     },
   },
   {

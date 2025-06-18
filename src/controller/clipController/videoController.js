@@ -240,15 +240,15 @@ const saveVideoAfterUpload = async (req, res) => {
       shares: 0,
       downloads: 0,
       thumbnailUrl: thumbnailUrl,
+      // Initialize new fields
+      sharedBy: [],
+      linkClicks: 0,
+      uniqueLinkClicks: [],
     })
 
     // Save the video
     await video.save()
     console.log(`Video saved to database: ${video._id}`)
-
-    // Generate basic thumbnail URL (optional - can be generated later)
-    // This thumbnailUrl should ideally be a direct S3 URL to an actual thumbnail image
-    // const thumbnailUrl = `${process.env.NEXT_PUBLIC_BASE_URL || "http://apitest.tribez.gg"}/api/videos/${video._id}/thumbnail`
 
     res.status(201).json({
       success: true,
@@ -324,6 +324,10 @@ const uploadVideo = async (req, res) => {
       comments: [],
       shares: 0,
       downloads: 0,
+      // Initialize new fields
+      sharedBy: [],
+      linkClicks: 0,
+      uniqueLinkClicks: [],
     })
 
     await video.save()
@@ -434,12 +438,18 @@ const getVideo = async (req, res) => {
   try {
     const { id } = req.params
     const userId = req.user ? req.user.id : null // Get userId if authenticated
-    const userIp = req.ip || req.headers["x-forwarded-for"] || "unknown" // Get IP address
+    // Use req.ip for a more direct IP, or fall back to headers
+    const userIp = req.ip || req.headers["x-forwarded-for"]?.split(",").shift() || "unknown"
     const isSharedLinkClick = req.query.source === "share" // Check for shared link source
+
+    console.log(
+      `[getVideo] Request for video ID: ${id}, User ID: ${userId}, IP: ${userIp}, Shared Link Click: ${isSharedLinkClick}`,
+    )
 
     const video = await Video.findById(id)
 
     if (!video || !video.isActive) {
+      console.log(`[getVideo] Video ID ${id} not found or inactive.`)
       return res.status(404).json({
         success: false,
         message: "Video not found",
@@ -448,6 +458,7 @@ const getVideo = async (req, res) => {
 
     // Increment view count (existing logic)
     video.views = (video.views || 0) + 1
+    console.log(`[getVideo] Video ID ${id} views incremented to: ${video.views}`)
 
     // Track unique views (existing logic)
     let alreadyViewed = false
@@ -459,11 +470,15 @@ const getVideo = async (req, res) => {
 
     if (!alreadyViewed) {
       video.uniqueViews.push({ userId: userId, ip: userIp, viewedAt: new Date() })
+      console.log(`[getVideo] Video ID ${id} unique view added. Total unique views: ${video.uniqueViews.length}`)
+    } else {
+      console.log(`[getVideo] Video ID ${id} already viewed by this user/IP.`)
     }
 
     // NEW: Track link clicks if from a shared source
     if (isSharedLinkClick) {
       video.linkClicks = (video.linkClicks || 0) + 1 // Increment total link clicks
+      console.log(`[getVideo] Video ID ${id} linkClicks incremented to: ${video.linkClicks}`)
 
       // Track unique link clicks
       let alreadyClicked = false
@@ -475,17 +490,23 @@ const getVideo = async (req, res) => {
 
       if (!alreadyClicked) {
         video.uniqueLinkClicks.push({ userId: userId, ip: userIp, clickedAt: new Date() })
+        console.log(
+          `[getVideo] Video ID ${id} unique link click added. Total unique link clicks: ${video.uniqueLinkClicks.length}`,
+        )
+      } else {
+        console.log(`[getVideo] Video ID ${id} already clicked by this user/IP.`)
       }
     }
 
     await video.save()
+    console.log(`[getVideo] Video ID ${id} saved successfully after updates.`)
 
     res.json({
       success: true,
       video: video,
     })
   } catch (error) {
-    console.error("Get video error:", error)
+    console.error("[getVideo] Error fetching video:", error)
     res.status(500).json({
       success: false,
       message: "Failed to fetch video",
@@ -735,10 +756,13 @@ const incrementShare = async (req, res) => {
   try {
     const { id } = req.params
     const userId = req.user ? req.user.id : null // Get userId if authenticated
-    const userIp = req.ip || req.headers["x-forwarded-for"] || "unknown" // Get IP address
+    const userIp = req.ip || req.headers["x-forwarded-for"]?.split(",").shift() || "unknown" // Get IP address
+
+    console.log(`[incrementShare] Request for video ID: ${id}, User ID: ${userId}, IP: ${userIp}`)
 
     const video = await Video.findById(id)
     if (!video || !video.isActive) {
+      console.log(`[incrementShare] Video ID ${id} not found or inactive.`)
       return res.status(404).json({
         success: false,
         message: "Video not found",
@@ -746,6 +770,7 @@ const incrementShare = async (req, res) => {
     }
 
     video.shares = (video.shares || 0) + 1 // Increment total share actions
+    console.log(`[incrementShare] Video ID ${id} total shares incremented to: ${video.shares}`)
 
     // Track unique sharers
     let alreadyShared = false
@@ -757,9 +782,13 @@ const incrementShare = async (req, res) => {
 
     if (!alreadyShared) {
       video.sharedBy.push({ userId: userId, ip: userIp, sharedAt: new Date() })
+      console.log(`[incrementShare] Video ID ${id} unique sharer added. Total unique sharers: ${video.sharedBy.length}`)
+    } else {
+      console.log(`[incrementShare] Video ID ${id} already shared by this user/IP.`)
     }
 
     await video.save()
+    console.log(`[incrementShare] Video ID ${id} saved successfully after updates.`)
 
     res.json({
       success: true,
@@ -767,7 +796,7 @@ const incrementShare = async (req, res) => {
       uniqueSharers: video.sharedBy.length, // Return the count of unique sharers
     })
   } catch (error) {
-    console.error("Increment share error:", error)
+    console.error("[incrementShare] Error incrementing share:", error)
     res.status(500).json({
       success: false,
       message: "Failed to increment share count",
@@ -862,12 +891,15 @@ module.exports = {
 
   // Traditional upload (ADDED)
   uploadVideo,
+
   // Video CRUD
   getVideos,
   getVideo,
   deleteVideo, // ADDED
+
   // Trending & Discovery (ADDED)
   getTrendingVideos,
+
   // Metadata & Sharing
   getVideoMetadata,
   getVideoThumbnail,
