@@ -432,16 +432,19 @@ const getTrendingVideos = async (req, res) => {
   }
 }
 
-// Get single video
+// Get single video (now only fetches data, view increment moved to /:id/view)
 const getVideo = async (req, res) => {
   try {
     const { id } = req.params
     const userId = req.user ? req.user.id : null
     const userIp = req.ip || req.headers["x-forwarded-for"]?.split(",").shift() || "unknown"
+    // Check for shared link source from query parameter
     const isSharedLinkClick = req.query.source === "share"
 
     console.log(`[getVideo] Request for video ID: ${id}`)
-    console.log(`[getVideo] User ID: ${userId}, IP: ${userIp}, Shared Link Click: ${isSharedLinkClick}`)
+    console.log(
+      `[getVideo] User ID: ${userId}, IP: ${userIp}, Query Source: ${req.query.source}, Is Shared Link Click: ${isSharedLinkClick}`,
+    )
 
     const video = await Video.findById(id)
 
@@ -453,32 +456,14 @@ const getVideo = async (req, res) => {
       })
     }
 
-    console.log(`[getVideo] Video state BEFORE update:
-      Views: ${video.views}, Unique Views: ${video.uniqueViews.length},
-      Link Clicks: ${video.linkClicks}, Unique Link Clicks: ${video.uniqueLinkClicks.length}`)
-
-    // Increment view count
-    video.views = (video.views || 0) + 1
-
-    // Track unique views
-    let alreadyViewed = false
-    if (userId) {
-      alreadyViewed = video.uniqueViews.some((entry) => entry.userId && entry.userId.equals(userId))
-    } else {
-      alreadyViewed = video.uniqueViews.some((entry) => entry.ip === userIp)
-    }
-
-    if (!alreadyViewed) {
-      video.uniqueViews.push({ userId: userId, ip: userIp, viewedAt: new Date() })
-      console.log(`[getVideo] Unique view added for video ID ${id}.`)
-    } else {
-      console.log(`[getVideo] Video ID ${id} already viewed by this user/IP.`)
-    }
-
     // NEW: Track link clicks if from a shared source
     if (isSharedLinkClick) {
+      console.log(`[getVideo] Processing shared link click for video ID: ${id}`)
+      console.log(
+        `[getVideo] Video state BEFORE link click update: Link Clicks: ${video.linkClicks}, Unique Link Clicks: ${video.uniqueLinkClicks.length}`,
+      )
+
       video.linkClicks = (video.linkClicks || 0) + 1 // Increment total link clicks
-      console.log(`[getVideo] Link click incremented for video ID ${id}.`)
 
       // Track unique link clicks
       let alreadyClicked = false
@@ -494,13 +479,16 @@ const getVideo = async (req, res) => {
       } else {
         console.log(`[getVideo] Video ID ${id} already clicked by this user/IP.`)
       }
+      await video.save() // Save changes to linkClicks and uniqueLinkClicks
+      console.log(
+        `[getVideo] Video state AFTER link click update: Link Clicks: ${video.linkClicks}, Unique Link Clicks: ${video.uniqueLinkClicks.length}`,
+      )
+    } else {
+      console.log(`[getVideo] Not a shared link click for video ID: ${id}. Link clicks not incremented.`)
     }
 
-    await video.save() // Save all changes
-    console.log(`[getVideo] Video ID ${id} saved successfully after updates.`)
-    console.log(`[getVideo] Video state AFTER update:
-      Views: ${video.views}, Unique Views: ${video.uniqueViews.length},
-      Link Clicks: ${video.linkClicks}, Unique Link Clicks: ${video.uniqueLinkClicks.length}`)
+    // Views increment logic has been moved to a separate endpoint (/api/videos/:id/view)
+    // This endpoint now only fetches the video data.
 
     res.json({
       success: true,
@@ -511,6 +499,66 @@ const getVideo = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch video",
+    })
+  }
+}
+
+// NEW: Increment video view count
+const incrementView = async (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = req.user ? req.user.id : null
+    const userIp = req.ip || req.headers["x-forwarded-for"]?.split(",").shift() || "unknown"
+
+    console.log(`[incrementView] Request for video ID: ${id}, User ID: ${userId}, IP: ${userIp}`)
+
+    const video = await Video.findById(id)
+
+    if (!video || !video.isActive) {
+      console.log(`[incrementView] Video ID ${id} not found or inactive.`)
+      return res.status(404).json({
+        success: false,
+        message: "Video not found",
+      })
+    }
+
+    console.log(
+      `[incrementView] Video state BEFORE update: Views: ${video.views}, Unique Views: ${video.uniqueViews.length}`,
+    )
+
+    video.views = (video.views || 0) + 1 // Increment total views
+
+    // Track unique views
+    let alreadyViewed = false
+    if (userId) {
+      alreadyViewed = video.uniqueViews.some((entry) => entry.userId && entry.userId.equals(userId))
+    } else {
+      alreadyViewed = video.uniqueViews.some((entry) => entry.ip === userIp)
+    }
+
+    if (!alreadyViewed) {
+      video.uniqueViews.push({ userId: userId, ip: userIp, viewedAt: new Date() })
+      console.log(`[incrementView] Unique view added for video ID ${id}.`)
+    } else {
+      console.log(`[incrementView] Video ID ${id} already viewed by this user/IP.`)
+    }
+
+    await video.save()
+    console.log(`[incrementView] Video ID ${id} saved successfully after updates.`)
+    console.log(
+      `[incrementView] Video state AFTER update: Views: ${video.views}, Unique Views: ${video.uniqueViews.length}`,
+    )
+
+    res.json({
+      success: true,
+      views: video.views,
+      uniqueViews: video.uniqueViews.length,
+    })
+  } catch (error) {
+    console.error("[incrementView] Error incrementing view:", error)
+    res.status(500).json({
+      success: false,
+      message: "Failed to increment view count",
     })
   }
 }
@@ -577,7 +625,7 @@ const getVideoMetadata = async (req, res) => {
       "og:type": "video.other",
       "og:locale": "en_US",
 
-      // Twitter Card
+      // Twitter Card specific
       "twitter:card": "player",
       "twitter:site": "@ClipApp",
       "twitter:creator": `@${video.username}`,
@@ -759,8 +807,7 @@ const incrementShare = async (req, res) => {
     const userId = req.user ? req.user.id : null
     const userIp = req.ip || req.headers["x-forwarded-for"]?.split(",").shift() || "unknown"
 
-    console.log(`[incrementShare] Request for video ID: ${id}`)
-    console.log(`[incrementShare] User ID: ${userId}, IP: ${userIp}`)
+    console.log(`[incrementShare] Request for video ID: ${id}, User ID: ${userId}, IP: ${userIp}`)
 
     const video = await Video.findById(id)
     if (!video || !video.isActive) {
@@ -915,4 +962,5 @@ module.exports = {
   addComment,
   incrementShare,
   getDownloadUrl,
+  incrementView, // NEWLY ADDED
 }
