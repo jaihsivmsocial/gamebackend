@@ -1,7 +1,7 @@
 const express = require("express")
 const router = express.Router()
-const streamController = require("../controller/stream-controller")
-const authenticate  = require("../middleware/authMiddleware")
+const streamController = require("../../controller/streamController/stream-controller")
+const authenticate  = require("../../middleware/authMiddleware")
 
 router.get("/", streamController.getActiveStreams)
 router.get("/top", streamController.getTopStreams)

@@ -1,6 +1,6 @@
 const express = require("express")
 const router = express.Router()
-const messageController = require("../controller/message-controller")
+const messageController = require("../../controller/messageController/message-controller")
 
 // Get messages for a stream
 router.get("/messages/:streamId", messageController.getMessages)

@@ -1,7 +1,7 @@
 require('dotenv').config();
 
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY)
-const User = require("../model/userModel")
+const User = require("../model/authModel/userModel")
 const PaymentMethod = require("../model/payment/PaymentMethod")
 /**
  * Stripe service to handle all Stripe-related operations

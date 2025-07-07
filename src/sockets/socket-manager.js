@@ -8,12 +8,12 @@ const {
   viewerCounter,
   chatRateLimiter,
 } = require("../config/redis");
-const Stream = require("../model/streamModel");
+const Stream = require("../model/streamModel/streamModel");
 const cron = require("node-cron");
 const mongoose = require("mongoose");
-const streamController = require("../controller/stream-controller");
+const streamController = require("../controller/streamController/stream-controller");
 const jwt = require("jsonwebtoken");
-const User = require("../model/userModel");
+const User = require("../model/authModel/userModel");
 const BetQuestion = require("../model/battingModel/BetQuestion");
 const Bet = require("../model/battingModel/Bet");
 const BetStats = require("../model/battingModel/BetStats");
@@ -1122,10 +1122,10 @@ module.exports = async function setupSocketIO(server) {
 
       // Also set test streams to 0
       const testStreamIds = [
-        "stream-1",
-        "stream-2",
-        "stream-3",
-        "stream-4",
+        // "stream-1",
+        // "stream-2",
+        // "stream-3",
+        // "stream-4",
         "default-stream",
       ];
       for (const streamId of testStreamIds) {

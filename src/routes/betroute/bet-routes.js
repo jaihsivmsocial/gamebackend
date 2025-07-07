@@ -9,7 +9,7 @@ const {
   updateWalletBalance,
   resetBalance,
   getPlatformFeeStats,
-  debugController,
+  // debugController,
   loginHook,
   placeBetWithPartialPayment,
 } = require("../../controller/BetController/bet-controller.js")
@@ -48,8 +48,6 @@ router.post("/wallet/update", authenticate, updateWalletBalance)
 // Reset user wallet balance (protected route)
 router.post("/wallet/reset", authenticate, resetBalance)
 
-// Debug endpoint
-router.get("/debug", debugController)
 router.post("/place-partial", authenticate, placeBetWithPartialPayment)
 
 module.exports = router

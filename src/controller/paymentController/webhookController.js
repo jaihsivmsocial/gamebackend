@@ -1,11 +1,14 @@
+require('dotenv').config();
+
 const Payment = require("../../model/payment/Payment")
 const PaymentMethod = require("../../model/payment/PaymentMethod")
-const User = require("../../model/userModel")
+const User = require("../../model/authModel/userModel")
 const stripeService = require("../../utils/payment-utils")
-
+const playfabService = require("../../utils/playfab/playfab-service") // Import PlayFab service
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY)
 
 /**
- * Handle Stripe webhook events
+ * Handle Stripe webhook events (with PlayFab integration)
  * @route POST /api/webhook
  * @access Public
  */
@@ -18,30 +21,24 @@ const handleWebhook = async (req, res) => {
 
   try {
     const event = stripeService.constructEvent(req.rawBody || req.body, signature)
-
     console.log(`Webhook received: ${event.type}`)
 
     switch (event.type) {
       case "payment_intent.succeeded":
         await handlePaymentIntentSucceeded(event.data.object)
         break
-
       case "payment_intent.payment_failed":
         await handlePaymentIntentFailed(event.data.object)
         break
-
       case "payment_method.attached":
         await handlePaymentMethodAttached(event.data.object)
         break
-
       case "payment_method.detached":
         await handlePaymentMethodDetached(event.data.object)
         break
-
       case "charge.refunded":
         await handleChargeRefunded(event.data.object)
         break
-
       default:
         console.log(`Unhandled event type: ${event.type}`)
     }
@@ -54,7 +51,7 @@ const handleWebhook = async (req, res) => {
 }
 
 /**
- * Handle payment_intent.succeeded event
+ * Handle payment_intent.succeeded event (with PlayFab integration)
  * @param {Object} paymentIntent - Stripe payment intent
  */
 const handlePaymentIntentSucceeded = async (paymentIntent) => {
@@ -69,6 +66,13 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
       return
     }
 
+    // Get user information
+    const user = await User.findById(payment.userId)
+    if (!user) {
+      console.log(`User not found for payment: ${payment._id}`)
+      return
+    }
+
     // Update payment status
     payment.status = "completed"
     payment.receiptUrl = paymentIntent.charges.data[0]?.receipt_url
@@ -76,7 +80,6 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
     // Save card details if available
     if (paymentIntent.payment_method) {
       const stripePaymentMethod = await stripe.paymentMethods.retrieve(paymentIntent.payment_method)
-
       if (stripePaymentMethod.card) {
         payment.cardDetails = {
           last4: stripePaymentMethod.card.last4,
@@ -115,7 +118,42 @@ const handlePaymentIntentSucceeded = async (paymentIntent) => {
     }
 
     await payment.save()
-    console.log(`Payment ${payment._id} marked as completed`)
+
+    // Update user's wallet balance
+    const previousBalance = user.walletBalance || 0
+    user.walletBalance = previousBalance + payment.amount
+    await user.save()
+
+    // Update PlayFab wallet
+    try {
+      await playfabService.getOrCreatePlayer(payment.userId.toString(), user.email, user.username)
+      await playfabService.updatePlayerWallet(
+        payment.userId.toString(),
+        payment.amount,
+        "Stripe Webhook - Payment Succeeded",
+      )
+      console.log(`PlayFab wallet updated for user ${payment.userId}: +${payment.amount}`)
+    } catch (playfabError) {
+      console.error("PlayFab wallet update error in webhook:", playfabError.message)
+    }
+
+    // Emit wallet update event if socket.io is available
+    try {
+      const io = require("../../controller/socket/socket-manager").io
+      if (io) {
+        io.emit("wallet_update", {
+          userId: payment.userId.toString(),
+          newBalance: user.walletBalance,
+          previousBalance: previousBalance,
+          change: payment.amount,
+          source: "webhook_payment_succeeded",
+        })
+      }
+    } catch (error) {
+      console.log("Socket.io not available for wallet update notification")
+    }
+
+    console.log(`Payment ${payment._id} marked as completed and wallet updated`)
   } catch (error) {
     console.error("Error handling payment_intent.succeeded:", error)
   }
@@ -142,6 +180,7 @@ const handlePaymentIntentFailed = async (paymentIntent) => {
     payment.metadata.set("failureMessage", paymentIntent.last_payment_error?.message || "Payment failed")
 
     await payment.save()
+
     console.log(`Payment ${payment._id} marked as failed`)
   } catch (error) {
     console.error("Error handling payment_intent.payment_failed:", error)
@@ -224,7 +263,7 @@ const handlePaymentMethodDetached = async (paymentMethod) => {
 }
 
 /**
- * Handle charge.refunded event
+ * Handle charge.refunded event (with PlayFab integration)
  * @param {Object} charge - Stripe charge
  */
 const handleChargeRefunded = async (charge) => {
@@ -239,13 +278,56 @@ const handleChargeRefunded = async (charge) => {
       return
     }
 
+    // Get user information
+    const user = await User.findById(payment.userId)
+    if (!user) {
+      console.log(`User not found for payment: ${payment._id}`)
+      return
+    }
+
     // Update payment status
     payment.status = "refunded"
     payment.metadata.set("refundId", charge.refunds.data[0]?.id)
     payment.metadata.set("refundReason", charge.refunds.data[0]?.reason)
 
     await payment.save()
-    console.log(`Payment ${payment._id} marked as refunded`)
+
+    // Update user's wallet balance (subtract the refunded amount)
+    const previousBalance = user.walletBalance || 0
+    const refundAmount = payment.amount
+    user.walletBalance = Math.max(0, previousBalance - refundAmount) // Ensure balance doesn't go negative
+    await user.save()
+
+    // Update PlayFab wallet (subtract the refunded amount)
+    try {
+      await playfabService.getOrCreatePlayer(payment.userId.toString(), user.email, user.username)
+      await playfabService.subtractFromWallet(
+        payment.userId.toString(),
+        refundAmount,
+        "Stripe Webhook - Charge Refunded",
+      )
+      console.log(`PlayFab wallet updated for user ${payment.userId}: -${refundAmount}`)
+    } catch (playfabError) {
+      console.error("PlayFab wallet update error in refund webhook:", playfabError.message)
+    }
+
+    // Emit wallet update event if socket.io is available
+    try {
+      const io = require("../../controller/socket/socket-manager").io
+      if (io) {
+        io.emit("wallet_update", {
+          userId: payment.userId.toString(),
+          newBalance: user.walletBalance,
+          previousBalance: previousBalance,
+          change: -refundAmount,
+          source: "webhook_charge_refunded",
+        })
+      }
+    } catch (error) {
+      console.log("Socket.io not available for wallet update notification")
+    }
+
+    console.log(`Payment ${payment._id} marked as refunded and wallet updated`)
   } catch (error) {
     console.error("Error handling charge.refunded:", error)
   }

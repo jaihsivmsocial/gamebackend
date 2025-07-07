@@ -1,6 +1,6 @@
 const express = require("express")
 const router = express.Router()
-const streamRoutes = require("./stream-routes")
+const streamRoutes = require("./streamRoute/stream-routes")
 const webrtcRoutes = require("./webrtc-routes")
 const  authenticate  = require("../middleware/authMiddleware")
 

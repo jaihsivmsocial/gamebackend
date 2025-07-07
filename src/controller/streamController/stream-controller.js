@@ -1,6 +1,6 @@
-const WebRTCService = require("../services/webrtc-service")
-const { redisClient, viewerCounter } = require("../config/redis")
-const Stream = require("../model/streamModel")
+const WebRTCService = require("../../services/webrtc-service")
+const { redisClient, viewerCounter } = require("../../config/redis")
+const Stream = require("../../model/streamModel/streamModel")
 const mongoose = require("mongoose")
 
 // Helper function to check if a string is a valid MongoDB ObjectId

@@ -8,7 +8,7 @@ const BetQuestionSchema = new mongoose.Schema(
     },
     subject: {
       type: String,
-      required: true, // e.g., "James5423"
+      required: true,
     },
     condition: {
       type: String,

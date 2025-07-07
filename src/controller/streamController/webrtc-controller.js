@@ -1,6 +1,6 @@
 // This file should be simplified since we're no longer using the WebRTCSignalingService
 
-const Stream = require("../model/streamModel")
+const Stream = require("../../model/streamModel/streamModel")
 const mongoose = require("mongoose")
 
 // Helper function to check if a string is a valid MongoDB ObjectId
