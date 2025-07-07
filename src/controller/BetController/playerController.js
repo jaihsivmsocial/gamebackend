@@ -51,6 +51,8 @@ exports.updatePlayer = async (req, res) => {
       return res.status(404).json({ message: "Player not found" });
     }
 
+    console.log("✅ currentPlayer --- found:", currentPlayer);
+
     console.log("✅ Current player found:", {
       id: currentPlayer._id,
       CameraHolderName: currentPlayer.CameraHolderName,
@@ -66,8 +68,11 @@ exports.updatePlayer = async (req, res) => {
     if (CameraHolderName !== undefined) {
       updateData.CameraHolderName = CameraHolderName;
       
+      
       if (currentPlayer.CameraHolderName === "None" && CameraHolderName !== "None") {
         updateData.CameraHoldStartTime = new Date();
+           updateData.KillsForCal = 0; 
+           updateData.playerName=  CameraHolderName; // Ensure playerName is set
         console.log(`Player ${CameraHolderName} started holding camera at ${updateData.CameraHoldStartTime}`);
       } 
       else if (currentPlayer.CameraHolderName !== "None" && CameraHolderName === "None") {
@@ -76,6 +81,9 @@ exports.updatePlayer = async (req, res) => {
           const holdDuration = Math.floor((endTime - currentPlayer.CameraHoldStartTime) / 1000);
           
           updateData.LastHoldDuration = holdDuration;
+             updateData.KillsForCal = 0; 
+             updateData.playerName=  CameraHolderName; // Ensure playerName is set
+
           updateData.TotalHoldTime = (currentPlayer.TotalHoldTime || 0) + holdDuration;
           updateData.CameraHoldStartTime = null;
           
@@ -83,6 +91,8 @@ exports.updatePlayer = async (req, res) => {
         }
         // When player stops holding camera, reset KillsForCal, but keep Kills (total lifetime kills)
         updateData.KillsForCal = 0; 
+        updateData.playerName=  CameraHolderName; // Ensure playerName is set
+
         console.log(`   KillsForCal reset to 0 for ${currentPlayer.CameraHolderName}`);
       }
     }

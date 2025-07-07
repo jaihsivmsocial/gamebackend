@@ -1,4 +1,4 @@
-const QualitySettings = require("../model/videoqualityModel")
+const QualitySettings = require("../../model/streamModel/videoqualityModel")
 
 const qualitySettingsController = {
   // Get quality settings for a user and stream

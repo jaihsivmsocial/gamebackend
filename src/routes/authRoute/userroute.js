@@ -9,8 +9,8 @@ updateProfile,
   requestOtpReset,
   verifyOtpAndResetPassword,
 
-} = require("../controller/authController")
-const authMiddleware = require("../middleware/authMiddleware")
+} = require("../../controller/authController/authController")
+const authMiddleware = require("../../middleware/authMiddleware")
 const router = express.Router()
 
 // Auth routes

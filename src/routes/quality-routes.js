@@ -1,6 +1,6 @@
 const express = require("express")
 const router = express.Router()
-const qualitySettingsController = require("../controller/videoquality-controller")
+const qualitySettingsController = require("../controller/streamController/videoquality-controller")
 
 
 // Get quality settings for a user and stream

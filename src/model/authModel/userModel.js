@@ -75,6 +75,26 @@ const UserSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+     playfabId: {
+      type: String,
+      sparse: true, // Allow null values but ensure uniqueness when present
+    },
+    playfabEntityId: {
+      type: String,
+      sparse: true, // This is the Entity ID required for InventoryV2
+    },
+    playfabEntityToken: {
+      type: String, // Store the actual EntityToken
+    },
+    playfabEntityTokenExpiration: {
+      type: Date, // When the EntityToken expires
+    },
+    playfabSessionTicket: {
+      type: String,
+    },
+    playfabLastLogin: {
+      type: Date,
+    },
     biggestWin: {
       type: Number,
       default: 0,

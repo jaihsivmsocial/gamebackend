@@ -1,5 +1,5 @@
-const Message = require("../model/messageModel.js")
-const { redisClient, chatRateLimiter } = require("../config/redis.js")
+const Message = require("../../model/messageModel/messageModel.js")
+const { redisClient, chatRateLimiter } = require("../../config/redis.js")
 
 const getDefaultAvatar = (anonymousId, username) => {
   const styles = ["adventurer", "avataaars", "bottts", "jdenticon"]
