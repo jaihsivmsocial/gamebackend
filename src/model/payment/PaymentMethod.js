@@ -13,7 +13,7 @@ const paymentMethodSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["card", "paypal"],
+      enum: ["card", "paypal", "wallet"],
       required: true,
     },
     isDefault: {
