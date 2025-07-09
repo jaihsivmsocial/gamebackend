@@ -23,7 +23,7 @@ const paymentSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ["credit", "debit", "paypal", "crypto", "balance"],
+      enum: ["credit", "debit", "paypal", "crypto", "balance","wallet_hybrid"],
       required: true,
     },
     stripePaymentIntentId: {
@@ -41,8 +41,7 @@ const paymentSchema = new mongoose.Schema(
       expYear: Number,
     },
     metadata: {
-      type: Map,
-      of: String,
+     type: mongoose.Schema.Types.Mixed,
       default: {},
     },
     receiptUrl: String,
