@@ -22,7 +22,8 @@ const authenticate = async (req, res, next) => {
       }
     }
     // 3. NEW: Check for token in query parameter (e.g., /purchase?token=YOUR_JWT)
-    else if (req.query.token) { // <--- THIS IS THE ADDED LOGIC
+    else if (req.query.token) {
+      // <--- THIS IS THE ADDED LOGIC
       token = req.query.token // <--- THIS IS THE ADDED LOGIC
     } // <--- THIS IS THE ADDED LOGIC
 
@@ -34,6 +35,7 @@ const authenticate = async (req, res, next) => {
     // Add debugging for token verification
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET || "fallback_secret_for_development")
+      // This line assumes a MongoDB User model and connection
       const user = await User.findById(decoded.id).select("-password")
       if (!user) {
         console.log("User not found for ID:", decoded.id)
