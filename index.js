@@ -61,9 +61,9 @@ app.use(
     origin: (origin, callback) => {
       const allowedOrigins = [
         process.env.FRONTEND_URL || "http://localhost:3000",
-        "https://test.tribez.gg",
-        "https://www.test.tribez.gg",
-        "https://13.48.129.159",
+        "https://5mof.gg.",
+        "https://www.5mof.gg",
+        "https://16.170.172.129",
       ]
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, origin || "*")
