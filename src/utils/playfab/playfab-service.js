@@ -329,8 +329,8 @@ class PlayFabService {
       // Get fresh EntityToken using server secret key
       const entityToken = await this.getValidEntityToken()
 
-      console.log(`📋 Getting InventoryV2 data for entity ${entityId}`)
-      console.log(`🔑 Using EntityToken: ${entityToken.substring(0, 20)}...`)
+      // console.log(`📋 Getting InventoryV2 data for entity ${entityId}`)
+      // console.log(`🔑 Using EntityToken: ${entityToken.substring(0, 20)}...`)
 
       const response = await axios.post(
         `${this.baseUrl}/Inventory/GetInventoryItems`,
