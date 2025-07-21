@@ -56,14 +56,16 @@ app.use(helmet())
 app.use(compression())
 
 // CORS middleware
+
+
 app.use(
   cors({
     origin: (origin, callback) => {
       const allowedOrigins = [
         process.env.FRONTEND_URL || "http://localhost:3000",
-        "https://5mof.gg.",
-        "https://www.5mof.gg",
-        "https://16.170.172.129",
+        "http://5mof.gg.",
+        "http://www.5mof.gg",
+        "http://16.170.172.129",
       ]
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, origin || "*")
