@@ -576,7 +576,7 @@ const getVideoMetadata = async (req, res) => {
       })
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://apitest.tribez.gg"
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://api.5mof.gg"
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"
 
     // Use the video's actual thumbnail URL from the database
