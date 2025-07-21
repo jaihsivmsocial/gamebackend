@@ -277,7 +277,7 @@ async function resolveQuestion(questionId) {
 async function checkCameraHolderChanges() {
   try {
     // Fetch the camera holder data from the API
-    const response = await fetch("https://apitest.tribez.gg/api/players/get");
+    const response = await fetch("http://api.5mof.gg/api/players/get");
     if (!response.ok) {
       console.error("Failed to fetch camera holder data:", response.status);
       return;
@@ -363,7 +363,7 @@ module.exports = async function setupSocketIO(server) {
   // Create Socket.IO server with Redis adapter for horizontal scaling
   io = new Server(server, {
     cors: {
-      origin: process.env.FRONTEND_URL || "https://apitest.tribez.gg",
+      origin: process.env.FRONTEND_URL || "http://api.5mof.gg",
       methods: ["GET", "POST"],
       credentials: true,
     },
