@@ -65,7 +65,7 @@ app.use(
   process.env.FRONTEND_URL || "http://localhost:3000",
   "http://5mof.gg",              // ✅ FIXED (no trailing dot)
   "http://www.5mof.gg",
-  "http://16.170.172.129",
+  "http://209.38.46.49",
 ]
 
       if (!origin || allowedOrigins.includes(origin)) {
