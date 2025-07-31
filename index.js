@@ -57,7 +57,6 @@ app.use(compression())
 
 // CORS middleware
 
-
 app.use(
   cors({
     origin: (origin, callback) => {
