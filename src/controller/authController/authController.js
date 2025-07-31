@@ -384,9 +384,12 @@ exports.logout = async (req, res) => {
 
 // Configure AWS S3
 AWS.config.update({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+ accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_REGION || "eu-north-1",
+  region: process.env.AWS_REGION, // 'ams3'
+  endpoint: new AWS.Endpoint("https://ams3.digitaloceanspaces.com"),
+  s3ForcePathStyle: false,
+  signatureVersion: "v4",
 })
 
 const s3 = new AWS.S3()
@@ -426,6 +429,7 @@ const uploadToS3 = async (file) => {
     Key: fileName,
     Body: file.buffer,
     ContentType: file.mimetype,
+    ACL: "public-read"
   }
 
   const result = await s3.upload(params).promise()

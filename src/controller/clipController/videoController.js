@@ -1,5 +1,4 @@
 // Complete production-ready video controller with enhanced error handling
-
 const Video = require("../../model/clip/videoModel")
 const path = require("path")
 
@@ -10,13 +9,13 @@ try {
   const { createPresignedPost } = require("@aws-sdk/s3-presigned-post")
 
   s3Client = new S3Client({
-    region: process.env.AWS_REGION,
+    region: "ams3", // Correct, matches your .env
+    endpoint: "https://ams3.digitaloceanspaces.com", // Correct
     credentials: {
       accessKeyId: process.env.AWS_ACCESS_KEY_ID,
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
     },
   })
-
   console.log("S3 Client initialized successfully")
   console.log("AWS Region:", process.env.AWS_REGION)
   console.log("AWS Bucket:", process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME)
@@ -44,7 +43,6 @@ const generatePresignedUrl = async (req, res) => {
     // Check environment variables
     const requiredEnvVars = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION"]
     const missingEnvVars = requiredEnvVars.filter((envVar) => !process.env[envVar])
-
     if (missingEnvVars.length > 0) {
       console.error("Missing environment variables:", missingEnvVars)
       return res.status(500).json({
@@ -100,7 +98,6 @@ const generatePresignedUrl = async (req, res) => {
 
     // Get bucket name with fallback
     const bucketName = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
-
     console.log("=== S3 CONFIGURATION ===")
     console.log("Bucket name:", bucketName)
     console.log("S3 Key:", uniqueKey)
@@ -110,7 +107,6 @@ const generatePresignedUrl = async (req, res) => {
 
     // Import createPresignedPost dynamically to catch import errors
     const { createPresignedPost } = require("@aws-sdk/s3-presigned-post")
-
     const presignedPostData = await createPresignedPost(s3Client, {
       Bucket: bucketName,
       Key: uniqueKey,
@@ -121,6 +117,7 @@ const generatePresignedUrl = async (req, res) => {
       ],
       Fields: {
         "Content-Type": contentType,
+        ACL: "public-read", // ADDED: Ensure public readability
       },
       Expires: 3600, // 1 hour expiry
     })
@@ -128,7 +125,6 @@ const generatePresignedUrl = async (req, res) => {
     console.log("=== PRESIGNED POST GENERATED ===")
     console.log("URL:", presignedPostData.url)
     console.log("Fields:", presignedPostData.fields)
-
     res.json({
       success: true,
       url: presignedPostData.url,
@@ -150,7 +146,6 @@ const generatePresignedUrl = async (req, res) => {
         error: "Invalid AWS credentials configuration",
       })
     }
-
     if (error.name === "UnknownEndpoint") {
       return res.status(500).json({
         success: false,
@@ -158,7 +153,6 @@ const generatePresignedUrl = async (req, res) => {
         error: "Invalid AWS region configuration",
       })
     }
-
     if (error.message.includes("bucket")) {
       return res.status(500).json({
         success: false,
@@ -191,7 +185,6 @@ const saveVideoAfterUpload = async (req, res) => {
         message: "Title is required",
       })
     }
-
     if (!s3Key) {
       return res.status(400).json({
         success: false,
@@ -209,10 +202,11 @@ const saveVideoAfterUpload = async (req, res) => {
 
     // Use your exact bucket name and region
     const bucketName = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
-    const region = process.env.AWS_REGION || "eu-north-1"
+    // MODIFIED: Ensure region consistency with S3 client initialization
+    const region = process.env.AWS_REGION || "ams3"
 
     // Construct the S3 URL
-    const videoUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${s3Key}`
+    const videoUrl = `https://${bucketName}.${region}.digitaloceanspaces.com/${s3Key}`
 
     // For thumbnailUrl, if a dedicated one isn't provided, use the videoUrl itself as a fallback.
     // Ideally, a separate thumbnail image would be generated and uploaded to S3.
@@ -243,12 +237,13 @@ const saveVideoAfterUpload = async (req, res) => {
       sharedBy: [], // Initialize new field
       linkClicks: 0, // Initialize new field
       uniqueLinkClicks: [], // Initialize new field
+      uniqueViews: [], // ADDED: Initialize uniqueViews field
     })
 
     // Save the video
     await video.save()
-    console.log(`Video saved to database: ${video._id}`)
 
+    console.log(`Video saved to database: ${video._id}`)
     res.status(201).json({
       success: true,
       message: "Video saved successfully",
@@ -288,7 +283,6 @@ const uploadVideo = async (req, res) => {
         message: "Title is required",
       })
     }
-
     if (!file) {
       return res.status(400).json({
         success: false,
@@ -302,10 +296,12 @@ const uploadVideo = async (req, res) => {
 
     // Use your exact bucket name and region
     const bucketName = process.env.AWS_S3_BUCKET || process.env.AWS_S3_BUCKET_NAME || "mstribe-website"
-    const region = process.env.AWS_REGION || "eu-north-1"
+    // MODIFIED: Ensure region consistency with S3 client initialization
+    const region = process.env.AWS_REGION || "ams3"
 
-    // Upload to S3 (you'll need to implement uploadToS3 function)
-    const videoUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${uniqueKey}`
+    // Upload to S3 (you'll need to implement uploadToS3 function here, ensuring public-read ACL)
+    // Example: await uploadToS3(file.buffer, uniqueKey, file.mimetype, bucketName, region);
+    const videoUrl = `https://${bucketName}.${region}.digitaloceanspaces.com/${uniqueKey}`
 
     // Create video record
     const video = new Video({
@@ -327,6 +323,7 @@ const uploadVideo = async (req, res) => {
       sharedBy: [],
       linkClicks: 0,
       uniqueLinkClicks: [],
+      uniqueViews: [], // ADDED: Initialize uniqueViews field
     })
 
     await video.save()
@@ -361,7 +358,6 @@ const getVideos = async (req, res) => {
     const skip = (page - 1) * limit
 
     const videos = await Video.find({ isActive: true }).sort({ createdAt: -1 }).skip(skip).limit(limit).lean()
-
     const totalVideos = await Video.countDocuments({ isActive: true })
     const hasNext = skip + videos.length < totalVideos
 
@@ -438,6 +434,7 @@ const getVideo = async (req, res) => {
     const { id } = req.params
     const userId = req.user ? req.user.id : null
     const userIp = req.ip || req.headers["x-forwarded-for"]?.split(",").shift() || "unknown"
+
     // Check for shared link source from query parameter
     const isSharedLinkClick = req.query.source === "share"
 
@@ -479,6 +476,7 @@ const getVideo = async (req, res) => {
       } else {
         console.log(`[getVideo] Video ID ${id} already clicked by this user/IP.`)
       }
+
       await video.save() // Save changes to linkClicks and uniqueLinkClicks
       console.log(
         `[getVideo] Video state AFTER link click update: Link Clicks: ${video.linkClicks}, Unique Link Clicks: ${video.uniqueLinkClicks.length}`,
@@ -489,7 +487,6 @@ const getVideo = async (req, res) => {
 
     // Views increment logic has been moved to a separate endpoint (/api/videos/:id/view)
     // This endpoint now only fetches the video data.
-
     res.json({
       success: true,
       video: video,
@@ -544,6 +541,7 @@ const incrementView = async (req, res) => {
     }
 
     await video.save()
+
     console.log(`[incrementView] Video ID ${id} saved successfully after updates.`)
     console.log(
       `[incrementView] Video state AFTER update: Views: ${video.views}, Unique Views: ${video.uniqueViews.length}`,
@@ -716,8 +714,8 @@ const toggleLike = async (req, res) => {
   try {
     const { id } = req.params
     const userId = req.user.id
-
     const video = await Video.findById(id)
+
     if (!video || !video.isActive) {
       return res.status(404).json({
         success: false,
@@ -769,6 +767,7 @@ const addComment = async (req, res) => {
     }
 
     const video = await Video.findById(id)
+
     if (!video || !video.isActive) {
       return res.status(404).json({
         success: false,
@@ -810,6 +809,7 @@ const incrementShare = async (req, res) => {
     console.log(`[incrementShare] Request for video ID: ${id}, User ID: ${userId}, IP: ${userIp}`)
 
     const video = await Video.findById(id)
+
     if (!video || !video.isActive) {
       console.log(`[incrementShare] Video ID ${id} not found or inactive.`)
       return res.status(404).json({
@@ -839,6 +839,7 @@ const incrementShare = async (req, res) => {
     }
 
     await video.save()
+
     console.log(`[incrementShare] Video ID ${id} saved successfully after updates.`)
     console.log(`[incrementShare] Video state AFTER update:
       Shares: ${video.shares}, Shared By: ${video.sharedBy.length}`)
@@ -861,8 +862,8 @@ const incrementShare = async (req, res) => {
 const getDownloadUrl = async (req, res) => {
   try {
     const { id } = req.params
-
     const video = await Video.findById(id)
+
     if (!video || !video.isActive) {
       return res.status(404).json({
         success: false,
@@ -893,8 +894,8 @@ const deleteVideo = async (req, res) => {
   try {
     const { id } = req.params
     const userId = req.user.id
-
     const video = await Video.findById(id)
+
     if (!video) {
       return res.status(404).json({
         success: false,
@@ -941,22 +942,17 @@ module.exports = {
   // Direct S3 upload (NEW)
   generatePresignedUrl,
   saveVideoAfterUpload,
-
   // Traditional upload (ADDED)
   uploadVideo,
-
   // Video CRUD
   getVideos,
   getVideo,
   deleteVideo, // ADDED
-
   // Trending & Discovery (ADDED)
   getTrendingVideos,
-
   // Metadata & Sharing
   getVideoMetadata,
   getVideoThumbnail,
-
   // Interactions
   toggleLike,
   addComment,
