@@ -1,5 +1,6 @@
 const { body, validationResult } = require("express-validator")
 const User = require("../../model/authModel/userModel")
+const { updatePlayFabInventory } = require("../paymentController/payment-controller") 
 const bcrypt = require("bcrypt")
 const jwt = require("jsonwebtoken")
 const crypto = require("crypto")
@@ -52,55 +53,73 @@ exports.register = async (req, res) => {
     const { DisplayName, username, email, password } = req.body
     // Standardize username to lowercase for consistent storage and lookup
     const standardizedUsername = username.toLowerCase()
-
     // Check if user already exists (by username or email)
     const existingUser = await User.findOne({
       $or: [{ email }, { username: standardizedUsername }],
     })
-
     if (existingUser) {
       return res.status(400).json({ message: "User already exists" })
     }
-
     // Hash the password before saving
     const salt = await bcrypt.genSalt(10)
     const hashedPassword = await bcrypt.hash(password, salt)
-
     // 1. Register user with PlayFab
     try {
       const playfabResponse = await playfabRequest("/Client/RegisterPlayFabUser", {
         TitleId: PLAYFAB_TITLE_ID,
         Username: standardizedUsername,
-        DisplayName: DisplayName,
+        DisplayName: standardizedUsername, // Changed DisplayName to be the same as standardizedUsername
         Email: email,
         Password: password, // PlayFab will handle password security
         RequireBothUsernameAndEmail: true,
       })
-
       // Extract Entity data from the response
       const entityId = playfabResponse.data.EntityToken?.Entity?.Id
       const entityToken = playfabResponse.data.EntityToken?.EntityToken
       const entityTokenExpiration = playfabResponse.data.EntityToken?.TokenExpiration
-
       // 2. Create new user in MongoDB with PlayFab data
       const user = new User({
         username: standardizedUsername,
         email,
         password: hashedPassword,
-        displayName: username,
+        displayName: standardizedUsername, // Also update the displayName stored in MongoDB
         playfabId: playfabResponse.data.PlayFabId,
         playfabEntityId: entityId,
         playfabEntityToken: entityToken,
         playfabEntityTokenExpiration: entityTokenExpiration ? new Date(entityTokenExpiration) : null,
         playfabSessionTicket: playfabResponse.data.SessionTicket,
         playfabLastLogin: new Date(),
+        // walletBalance will default to 10 as per userModel.js
       })
-
       await user.save()
+
+      // --- NEW CODE ADDED HERE ---
+      // Sync the initial wallet balance to PlayFab after user is saved and PlayFab IDs are set
+      if (user.walletBalance > 0) {
+        console.log(
+          `Attempting to sync initial wallet balance to PlayFab for user ${user.username}. Amount: ${user.walletBalance}`,
+        )
+        // Use a unique ID for the paymentId, e.g., a combination of user ID and a timestamp
+        const playFabSyncResult = await updatePlayFabInventory(
+          user,
+          user.walletBalance,
+          `initial_registration_${user._id}_${Date.now()}`, // Unique payment ID
+          "initial_wallet_sync",
+        )
+
+        if (playFabSyncResult.success) {
+          console.log("✅ Initial wallet balance successfully synced to PlayFab.")
+        } else {
+          console.error("❌ Failed to sync initial wallet balance to PlayFab:", playFabSyncResult.error)
+          // You might want to log more details from playFabSyncResult.error for debugging
+        }
+      } else {
+        console.log(`User ${user.username} has 0 initial wallet balance, skipping PlayFab sync.`)
+      }
+      // --- END NEW CODE ---
 
       // Generate JWT token for immediate login
       const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: "7d" })
-
       // Return the complete response including the full PlayFab response
       res.status(201).json({
         code: playfabResponse.code,
@@ -111,11 +130,12 @@ exports.register = async (req, res) => {
         user: {
           id: user._id,
           username: user.username,
-          DisplayName: DisplayName,
+          DisplayName: standardizedUsername, // Ensure the returned DisplayName is also consistent
           email: user.email,
           profilePicture: user.profilePicture,
           playfabId: user.playfabId,
           playfabEntityId: user.playfabEntityId,
+          walletBalance: user.walletBalance, // Include walletBalance in the response
         },
       })
     } catch (playfabError) {
@@ -131,40 +151,32 @@ exports.register = async (req, res) => {
     res.status(500).json({ message: "Server error" })
   }
 }
-
 exports.login = async (req, res) => {
   try {
     const { username, password } = req.body
-
     // Validate request body
     if (!username || !password) {
       return res.status(400).json({ error: "Username and password are required" })
     }
-
     // Check if JWT_SECRET is set
     if (!process.env.JWT_SECRET) {
       return res.status(500).json({ error: "JWT_SECRET is missing in environment variables" })
     }
-
     // Convert username to lowercase for case-insensitive login
     const standardizedUsername = username.toLowerCase()
     const user = await User.findOne({ username: standardizedUsername })
-
     if (!user) {
       return res.status(400).json({ error: "Invalid credentials" })
     }
-
     // Ensure user.password exists
     if (!user.password) {
       return res.status(500).json({ error: "User password not set in database" })
     }
-
     // Compare passwords
     const isMatch = await bcrypt.compare(password, user.password)
     if (!isMatch) {
       return res.status(400).json({ error: "Invalid credentials" })
     }
-
     // Login with PlayFab
     try {
       const playfabResponse = await playfabRequest("/Client/LoginWithPlayFab", {
@@ -172,41 +184,33 @@ exports.login = async (req, res) => {
         Username: standardizedUsername,
         Password: password,
       })
-
       // Extract Entity data from the response
       const entityId = playfabResponse.data.EntityToken?.Entity?.Id
       const entityToken = playfabResponse.data.EntityToken?.EntityToken
       const entityTokenExpiration = playfabResponse.data.EntityToken?.TokenExpiration
-
       // Update PlayFab session information in MongoDB
       user.playfabSessionTicket = playfabResponse.data.SessionTicket
       user.playfabLastLogin = new Date()
-
       // Update Entity data
       if (entityId && user.playfabEntityId !== entityId) {
         user.playfabEntityId = entityId
         console.log(`Updated Entity ID for user ${user.username}: ${entityId}`)
       }
-
       if (entityToken) {
         user.playfabEntityToken = entityToken
         user.playfabEntityTokenExpiration = entityTokenExpiration ? new Date(entityTokenExpiration) : null
         console.log(`Updated Entity Token for user ${user.username}`)
       }
-
       await user.save()
-
       // Generate token with consistent payload structure
       const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, {
         expiresIn: "24h",
       })
-
       // Set both cookie and return token in response for maximum compatibility
       const cookieData = {
         token: token,
         username: user.username,
       }
-
       // Set HTTP-only cookie for secure browser storage
       res.cookie("authData", JSON.stringify(cookieData), {
         httpOnly: true,
@@ -214,7 +218,6 @@ exports.login = async (req, res) => {
         sameSite: "Lax",
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       })
-
       // Return the complete PlayFab response structure
       res.json({
         code: playfabResponse.code,
@@ -229,10 +232,8 @@ exports.login = async (req, res) => {
       })
     } catch (playfabError) {
       console.error("PlayFab login error:", playfabError)
-
       // If PlayFab login fails but MongoDB login succeeded, we'll still log the user in
       // but we'll try to repair the PlayFab account on the next successful login
-
       const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, {
         expiresIn: "24h",
       })
@@ -246,7 +247,6 @@ exports.login = async (req, res) => {
         sameSite: "Lax",
         maxAge: 7 * 24 * 60 * 60 * 1000,
       })
-
       res.json({
         token,
         username: user.username,
