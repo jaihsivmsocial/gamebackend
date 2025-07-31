@@ -57,9 +57,9 @@ const generateRandomQuestion = async () => {
     // let totalTime = 30
 
     const conditions = [
-      "Will  be able to get  5 Kill in 30 sec",
-      "Will  be able to get 3 Kill in 35 Sec",
-      "Will  be able to get 5 Kill in 40 Sec",
+      " be able to get  5 Kill in 30 sec",
+      " be able to get 3 Kill in 35 Sec",
+      "be able to get 5 Kill in 40 Sec",
     ];
 
     const randomCondition =
