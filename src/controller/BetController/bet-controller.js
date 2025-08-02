@@ -1,5 +1,4 @@
 require("dotenv").config()
-
 const Bet = require("../../model/battingModel/Bet.js")
 const BetQuestion = require("../../model/battingModel/BetQuestion.js")
 const User = require("../../model/authModel/userModel.js")
@@ -13,7 +12,6 @@ const playFabService = require("../../utils/playfab/playfab-service.js")
 
 let io
 let socketManager
-
 try {
   socketManager = require("../socket/socket-manager.js")
   io = socketManager.io
@@ -46,11 +44,12 @@ const ensureUserBalance = async (userId) => {
 
 /**
  * Helper function to update PlayFab inventory for all betting operations.
- * This function centralizes calls to the PlayFab service.
+ * This function centralizes calls to the PlayFab service and updates the MongoDB user balance.
  * @param {Object} user - The user object from MongoDB.
  * @param {number} amount - The amount to add or deduct. Positive for additions, negative for deductions.
  * @param {string} transactionId - The unique ID for this transaction (e.g., bet ID).
  * @param {string} source - A descriptive source for the transaction (e.g., 'bet_placement', 'bet_win').
+ * @returns {Promise<{success: boolean, newBalance?: number, error?: string, playFabResult?: Object}>}
  */
 const updatePlayFabInventory = async (user, amount, transactionId, source = "bet") => {
   try {
@@ -60,24 +59,31 @@ const updatePlayFabInventory = async (user, amount, transactionId, source = "bet
     // 1. Check if PlayFab is configured in your environment variables.
     if (!playFabService.isConfigured()) {
       console.log("❌ PlayFab not configured, skipping inventory update.")
-      return { success: false, reason: "PlayFab not configured" }
+      // Return an estimated new balance if PlayFab is not configured
+      const estimatedNewBalance = (user.walletBalance || 0) + amount
+      user.walletBalance = estimatedNewBalance
+      await user.save()
+      return { success: true, newBalance: estimatedNewBalance, reason: "PlayFab not configured" }
     }
 
     // 2. Check if the user has a PlayFab Entity ID.
     const entityId = playFabService.getPlayFabEntityId(user)
     if (!entityId) {
       console.log(`❌ No PlayFab Entity ID found for user ${user._id}, skipping inventory update.`)
-      return { success: false, reason: "No PlayFab Entity ID" }
+      // Return an estimated new balance if no PlayFab Entity ID
+      const estimatedNewBalance = (user.walletBalance || 0) + amount
+      user.walletBalance = estimatedNewBalance
+      await user.save()
+      return { success: true, newBalance: estimatedNewBalance, reason: "No PlayFab Entity ID" }
     }
-
     console.log(`✅ Using PlayFab Entity ID: ${entityId} for user ${user._id}`)
 
     // 3. Get current balance from PlayFab for logging purposes.
-    let currentBalance = "N/A"
+    let currentPlayFabBalance = "N/A"
     try {
       const currentInventory = await playFabService.getPlayerInventory(user)
-      currentBalance = currentInventory.virtualCurrencyBalance || 0
-      console.log(`📊 Current PlayFab balance before update: ${currentBalance}`)
+      currentPlayFabBalance = currentInventory.virtualCurrencyBalance || 0
+      console.log(`📊 Current PlayFab balance before update: ${currentPlayFabBalance}`)
     } catch (balanceError) {
       console.log(`⚠️ Could not get current PlayFab balance: ${balanceError.message}`)
     }
@@ -91,23 +97,26 @@ const updatePlayFabInventory = async (user, amount, transactionId, source = "bet
       userId: user._id.toString(),
     })
 
-    // 5. Log the result of the PlayFab API call.
+    // 5. Log the result of the PlayFab API call and update MongoDB balance.
     if (result.success) {
       console.log(`✅ Successfully updated PlayFab inventory for user ${user._id}.`)
       console.log("✅ PlayFab Result Details:", JSON.stringify(result.playFabResult, null, 2))
-      // Verify balance after update
-      try {
-        const updatedInventory = await playFabService.getPlayerInventory(user)
-        const newBalance = updatedInventory.virtualCurrencyBalance || 0
-        console.log(`📊 PlayFab balance after update: ${newBalance} (Change: ${newBalance - currentBalance})`)
-      } catch (balanceError) {
-        console.log(`⚠️ Could not get updated balance for verification: ${balanceError.message}`)
-      }
+
+      // Get the new balance from PlayFab after the update
+      const updatedInventory = await playFabService.getPlayerInventory(user)
+      const newBalance = updatedInventory.virtualCurrencyBalance || 0
+      console.log(`📊 PlayFab balance after update: ${newBalance} (Change: ${newBalance - currentPlayFabBalance})`)
+
+      // Update the user's wallet balance in MongoDB to match PlayFab
+      user.walletBalance = newBalance
+      await user.save()
+      console.log(`✅ MongoDB wallet balance updated to: ${user.walletBalance}`)
+
+      return { success: true, newBalance: newBalance, playFabResult: result.playFabResult }
     } else {
       console.error(`❌ Failed to update PlayFab inventory: ${result.error}`)
+      return result // Return the error from PlayFab service
     }
-
-    return result
   } catch (error) {
     console.error("❌ Unhandled error in updatePlayFabInventory:", error.message)
     return { success: false, error: error.message }
@@ -335,6 +344,28 @@ exports.placeBet = async (req, res) => {
     const betAmountAfterFee = amount - platformFee
     console.log(`Calculating platform fee: ${platformFee} (${platformFeePercentage * 100}% of ${amount})`)
     console.log(`Bet amount after fee: ${betAmountAfterFee}`)
+
+    // Store the previous balance for response
+    const previousBalance = user.walletBalance || 0
+
+    // *** PLAYFAB INTEGRATION: DEDUCT FROM PLAYFAB INVENTORY ***
+    const playFabDeductResult = await updatePlayFabInventory(
+      user,
+      -amount, // Use a negative amount to signify a deduction
+      new mongoose.Types.ObjectId().toString(), // Generate a new transaction ID for this PlayFab call
+      "bet_placement",
+    )
+
+    if (!playFabDeductResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: playFabDeductResult.error || "Failed to deduct from PlayFab inventory",
+      })
+    }
+
+    // The user.walletBalance is already updated by updatePlayFabInventory
+    const newBalanceAfterDeduction = playFabDeductResult.newBalance
+
     // Create the bet with the amount after fee
     console.log("Creating new bet")
     const bet = new Bet({
@@ -353,22 +384,6 @@ exports.placeBet = async (req, res) => {
     })
     await bet.save() // Save bet to get its ID
 
-    // Store the previous balance for response
-    const previousBalance = user.walletBalance || 0
-    // Update user's wallet balance
-    console.log("Updating user wallet balance from", previousBalance, "to", previousBalance - amount)
-    user.walletBalance = previousBalance - amount
-    user.totalBets = (user.totalBets || 0) + 1
-    await user.save()
-
-    // *** PLAYFAB INTEGRATION: DEDUCT FROM PLAYFAB INVENTORY ***
-    await updatePlayFabInventory(
-      user,
-      -amount, // Use a negative amount to signify a deduction
-      bet._id.toString(),
-      "bet_placement",
-    )
-
     // Create transaction record for the bet
     console.log("Creating bet transaction record")
     const betTransaction = new Transaction({
@@ -377,9 +392,10 @@ exports.placeBet = async (req, res) => {
       amount: -betAmountAfterFee, // Record the bet amount after fee
       bet: bet._id,
       question: question._id,
-      balanceAfter: user.walletBalance + platformFee, // Temporary balance after just the bet
+      balanceAfter: newBalanceAfterDeduction + platformFee, // Balance before platform fee deduction
     })
     await betTransaction.save()
+
     // Create transaction record for the platform fee
     console.log("Creating platform fee transaction record")
     const feeTransaction = new Transaction({
@@ -388,9 +404,14 @@ exports.placeBet = async (req, res) => {
       amount: -platformFee, // Record the platform fee as a separate transaction
       bet: bet._id,
       question: question._id,
-      balanceAfter: user.walletBalance, // Final balance after both bet and fee
+      balanceAfter: newBalanceAfterDeduction, // Final balance after both bet and fee
     })
     await feeTransaction.save()
+
+    // Update user's total bets count
+    user.totalBets = (user.totalBets || 0) + 1
+    await user.save() // Save user with updated totalBets
+
     // Update question stats with the bet amount after fee
     console.log("Updating question stats")
     if (choice === "Yes") {
@@ -432,6 +453,7 @@ exports.placeBet = async (req, res) => {
       question.totalPlayers = (question.totalPlayers || 0) + 1
     }
     question.totalPlatformFees = (question.totalPlatformFees || 0) + platformFee
+
     // Recalculate percentages based on user counts instead of bet amounts
     const totalUsers = (question.yesUserCount || 0) + (question.noUserCount || 0)
     if (totalUsers > 0) {
@@ -443,7 +465,7 @@ exports.placeBet = async (req, res) => {
         if (question.yesPercentage > question.noPercentage) {
           question.yesPercentage = 100 - question.noPercentage
         } else {
-          question.noPercentage = 100 - question.yesPercentage
+          question.noPercentage = 100 - question.yesPercentage // Fix: use question.yesPercentage here
         }
       }
     } else {
@@ -452,26 +474,34 @@ exports.placeBet = async (req, res) => {
       question.noPercentage = 50
     }
     await question.save()
-    // Calculate potential payout based on current odds
+
+    // Calculate potential payout based on current odds (using bet amounts)
     console.log("Calculating potential payout")
-    const odds =
-      choice === "Yes" ? question.noPercentage / question.yesPercentage : question.yesPercentage / question.noPercentage
-    // Calculate potential winnings with 5% platform fee
-    // Formula: payout = bet * 2 * 0.95
+    let odds = 1.0 // Default to 1:1 odds
+    if (choice === "Yes" && question.noBetAmount > 0) {
+      odds = question.noBetAmount / question.yesBetAmount
+    } else if (choice === "No" && question.yesBetAmount > 0) {
+      odds = question.yesBetAmount / question.noBetAmount
+    }
+
+    // Calculate potential winnings with 5% platform fee on winnings
     const platformFeePercentageOnWinnings = 0.05
     const grossPotentialWinnings = betAmountAfterFee * odds
     const platformFeeOnWinnings = (betAmountAfterFee + grossPotentialWinnings) * platformFeePercentageOnWinnings
     const potentialPayout = betAmountAfterFee + grossPotentialWinnings - platformFeeOnWinnings
+
     console.log(`Potential payout calculation:`)
     console.log(`- Bet amount after initial fee: ${betAmountAfterFee}`)
     console.log(`- Odds: ${odds}`)
     console.log(`- Gross potential winnings: ${grossPotentialWinnings}`)
     console.log(`- Platform fee (${platformFeePercentageOnWinnings * 100}%): ${platformFeeOnWinnings}`)
     console.log(`- Net potential payout: ${potentialPayout}`)
+
     bet.potentialPayout = potentialPayout
     bet.grossPotentialPayout = betAmountAfterFee + grossPotentialWinnings
     bet.platformFeeOnWinnings = platformFeeOnWinnings
     await bet.save()
+
     // Try to match the bet
     console.log("Matching bet")
     try {
@@ -480,6 +510,7 @@ exports.placeBet = async (req, res) => {
       console.error("Error matching bet:", matchError)
       // Continue even if matching fails
     }
+
     // Update global stats
     console.log("Updating global stats")
     try {
@@ -488,6 +519,7 @@ exports.placeBet = async (req, res) => {
       console.error("Error updating stats:", statsError)
       // Continue even if stats update fails
     }
+
     // Emit socket events for real-time updates
     console.log("Emitting socket events")
     if (io) {
@@ -518,7 +550,7 @@ exports.placeBet = async (req, res) => {
       // IMPORTANT: Emit wallet update event with real-time balance
       io.emit("wallet_update", {
         userId: userId,
-        newBalance: user.walletBalance,
+        newBalance: newBalanceAfterDeduction,
         previousBalance: previousBalance,
         change: -amount,
         platformFee: platformFee,
@@ -526,7 +558,7 @@ exports.placeBet = async (req, res) => {
       // Add a specific bet_response event for immediate UI updates
       io.emit("bet_response", {
         success: true,
-        newBalance: user.walletBalance,
+        newBalance: newBalanceAfterDeduction,
         previousBalance: previousBalance,
         change: -amount,
         platformFee: platformFee,
@@ -534,7 +566,7 @@ exports.placeBet = async (req, res) => {
       })
     }
     console.log("Bet placed successfully")
-    console.log("New balance:", user.walletBalance)
+    console.log("New balance:", newBalanceAfterDeduction)
     console.log("Previous balance:", previousBalance)
     res.status(201).json({
       success: true,
@@ -544,7 +576,7 @@ exports.placeBet = async (req, res) => {
         originalAmount: amount,
         platformFee: platformFee,
       },
-      newBalance: user.walletBalance,
+      newBalance: newBalanceAfterDeduction,
       previousBalance: previousBalance,
       platformFee: platformFee,
       questionStats: {
@@ -611,22 +643,41 @@ exports.resetBalance = async (req, res) => {
     // Get the amount from request body or use 0 as default
     const resetAmount = req.body.amount !== undefined ? Number(req.body.amount) : 0
     console.log(`Resetting wallet balance for user ${userId} from ${previousBalance} to ${resetAmount}`)
-    // Reset the balance to the specified amount or 0
-    user.walletBalance = resetAmount
-    await user.save()
+
+    // Calculate the change needed for PlayFab
+    const changeAmount = resetAmount - previousBalance
+
+    // *** PLAYFAB INTEGRATION: UPDATE PLAYFAB INVENTORY ***
+    const playFabResult = await updatePlayFabInventory(
+      user,
+      changeAmount,
+      new mongoose.Types.ObjectId().toString(), // Unique transaction ID
+      "balance_reset",
+    )
+
+    if (!playFabResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: playFabResult.error || "Failed to reset balance in PlayFab",
+      })
+    }
+
+    // The user.walletBalance is already updated by updatePlayFabInventory
+    const newBalance = playFabResult.newBalance
+
     // Emit wallet update event
     if (io) {
       io.emit("wallet_update", {
         userId: userId,
-        newBalance: resetAmount,
+        newBalance: newBalance,
         previousBalance: previousBalance,
-        change: resetAmount - previousBalance,
+        change: changeAmount,
       })
     }
     res.status(200).json({
       success: true,
-      message: `Wallet balance reset to ${resetAmount}`,
-      newBalance: resetAmount,
+      message: `Wallet balance reset to ${newBalance}`,
+      newBalance: newBalance,
       previousBalance: previousBalance,
     })
   } catch (error) {
@@ -672,22 +723,40 @@ exports.updateWalletBalance = async (req, res) => {
     }
     // Store previous balance for response
     const previousBalance = user.walletBalance || 0
-    // Update the balance with the provided amount
-    user.walletBalance = Number(amount)
-    await user.save()
-    console.log(`Updated wallet balance for user ${userId} from ${previousBalance} to ${user.walletBalance}`)
+    const targetBalance = Number(amount)
+    const changeAmount = targetBalance - previousBalance
+
+    // *** PLAYFAB INTEGRATION: UPDATE PLAYFAB INVENTORY ***
+    const playFabResult = await updatePlayFabInventory(
+      user,
+      changeAmount,
+      new mongoose.Types.ObjectId().toString(), // Unique transaction ID
+      "manual_balance_update",
+    )
+
+    if (!playFabResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: playFabResult.error || "Failed to update balance in PlayFab",
+      })
+    }
+
+    // The user.walletBalance is already updated by updatePlayFabInventory
+    const newBalance = playFabResult.newBalance
+
+    console.log(`Updated wallet balance for user ${userId} from ${previousBalance} to ${newBalance}`)
     // Emit wallet update event
     if (io) {
       io.emit("wallet_update", {
         userId: userId,
-        newBalance: user.walletBalance,
+        newBalance: newBalance,
         previousBalance: previousBalance,
-        change: user.walletBalance - previousBalance,
+        change: changeAmount,
       })
     }
     res.status(200).json({
       success: true,
-      newBalance: user.walletBalance,
+      newBalance: newBalance,
       previousBalance: previousBalance,
     })
   } catch (error) {
@@ -711,8 +780,10 @@ const matchBet = async (newBet, question) => {
       status: { $in: ["pending", "partially_matched"] },
       processed: false,
     }).sort({ timestamp: 1 }) // First in, first matched
+
     let remainingAmount = newBet.amount // This is already the amount after fee
     let matchedAmount = 0
+
     // Try to match with opposite bets
     for (const oppositeBet of oppositeBets) {
       if (remainingAmount <= 0) break
@@ -723,11 +794,13 @@ const matchBet = async (newBet, question) => {
         oppositeBet.matchedAmount = (oppositeBet.matchedAmount || 0) + amountToMatch
         oppositeBet.status = oppositeBet.matchedAmount === oppositeBet.amount ? "matched" : "partially_matched"
         await oppositeBet.save()
+
         // Update the new bet
         matchedAmount += amountToMatch
         remainingAmount -= amountToMatch
       }
     }
+
     // Update the new bet status
     newBet.matchedAmount = matchedAmount
     if (matchedAmount === 0) {
@@ -737,26 +810,33 @@ const matchBet = async (newBet, question) => {
     } else {
       newBet.status = "partially_matched"
     }
+
     // Calculate potential payout based on matched amount and odds
     // Get total amounts bet on Yes and No
     const totalYesBets = question.yesBetAmount || 0
     const totalNoBets = question.noBetAmount || 0
+
     // Calculate odds based on actual bet amounts
     let odds = 1.0 // Default to 1:1 odds
-    if (newBet.choice === "Yes" && totalNoBets > 0) {
+    if (newBet.choice === "Yes" && totalNoBets > 0 && totalYesBets > 0) {
       odds = totalNoBets / totalYesBets
-    } else if (newBet.choice === "No" && totalYesBets > 0) {
+    } else if (newBet.choice === "No" && totalYesBets > 0 && totalNoBets > 0) {
       odds = totalYesBets / totalNoBets
     }
-    // Calculate potential payout with platform fee
+
+    // Calculate potential winnings with 5% platform fee on winnings
     const platformFeePercentageOnWinnings = 0.05
     const grossPotentialWinnings = matchedAmount * odds
-    const potentialPayout = matchedAmount + grossPotentialWinnings * (1 - platformFeePercentageOnWinnings)
+    const platformFeeOnWinnings = (matchedAmount + grossPotentialWinnings) * platformFeePercentageOnWinnings
+    const potentialPayout = matchedAmount + grossPotentialWinnings - platformFeeOnWinnings
+
     console.log(`Potential payout calculation for matched bet:`)
     console.log(`- Matched amount: ${matchedAmount}`)
     console.log(`- Odds: ${odds}`)
     console.log(`- Gross potential winnings: ${grossPotentialWinnings}`)
-    console.log(`- Potential payout: ${potentialPayout}`)
+    console.log(`- Platform fee (${platformFeePercentageOnWinnings * 100}%): ${platformFeeOnWinnings}`)
+    console.log(`- Net potential payout: ${potentialPayout}`)
+
     newBet.potentialPayout = potentialPayout
     await newBet.save()
   } catch (error) {
@@ -776,11 +856,13 @@ const updateBetStats = async (betAmount, platformFee) => {
     const endOfWeek = new Date(startOfWeek)
     endOfWeek.setDate(startOfWeek.getDate() + 6)
     endOfWeek.setHours(23, 59, 59, 999)
+
     // Find or create stats for current week
     let stats = await BetStats.findOne({
       weekStartDate: { $lte: now },
       weekEndDate: { $gte: now },
     })
+
     if (!stats) {
       stats = new BetStats({
         totalBetsAmount: 0,
@@ -792,6 +874,7 @@ const updateBetStats = async (betAmount, platformFee) => {
         weekEndDate: endOfWeek,
       })
     }
+
     // Update stats
     stats.totalBetsAmount = (stats.totalBetsAmount || 0) + betAmount
     stats.totalPlatformFees = (stats.totalPlatformFees || 0) + platformFee
@@ -847,8 +930,10 @@ exports.resolveBetQuestion = async (req, res) => {
     question.active = false
     // question.correctChoice = outcome
     await question.save()
+
     // Process all bets for this question
     await processBetsForQuestion(question._id, outcome)
+
     // Emit socket event for question resolution
     if (io) {
       io.emit("questionResolved", {
@@ -878,10 +963,12 @@ const processBetsForQuestion = async (questionId, outcome) => {
     // Get all bets for this question
     const bets = await Bet.find({ question: questionId, processed: false })
     console.log(`Processing ${bets.length} bets for question ${questionId} with outcome ${outcome}`)
+
     // First, check if there are both Yes and No bets
     const yesBets = bets.filter((bet) => bet.choice === "Yes")
     const noBets = bets.filter((bet) => bet.choice === "No")
     console.log(`Found ${yesBets.length} Yes bets and ${noBets.length} No bets`)
+
     // If there are only Yes bets or only No bets, refund all bets
     if (yesBets.length === 0 || noBets.length === 0) {
       console.log(`Only ${yesBets.length === 0 ? "No" : "Yes"} bets found. Refunding all bets.`)
@@ -894,6 +981,24 @@ const processBetsForQuestion = async (questionId, outcome) => {
         // Refund the full original amount
         const refundAmount = bet.amount
         console.log(`Refunding ${refundAmount} to user ${user._id} for unmatched bet`)
+
+        // *** PLAYFAB INTEGRATION: REFUND TO PLAYFAB INVENTORY ***
+        const playFabRefundResult = await updatePlayFabInventory(
+          user,
+          refundAmount, // Positive amount to add back
+          new mongoose.Types.ObjectId().toString(), // Unique transaction ID
+          "bet_refund",
+        )
+
+        if (!playFabRefundResult.success) {
+          console.error(`❌ PlayFab refund failed for user ${user._id}:`, playFabRefundResult.error)
+          // Log the error but don't fail the entire process
+          continue
+        }
+
+        // The user.walletBalance is already updated by updatePlayFabInventory
+        const newBalanceAfterRefund = playFabRefundResult.newBalance
+
         // Create refund transaction
         const refundTransaction = new Transaction({
           user: user._id,
@@ -901,34 +1006,22 @@ const processBetsForQuestion = async (questionId, outcome) => {
           amount: refundAmount,
           bet: bet._id,
           question: questionId,
-          balanceAfter: user.walletBalance + refundAmount,
+          balanceAfter: newBalanceAfterRefund,
           description: "Refund for unmatched bet (no opposing bets)",
         })
         await refundTransaction.save()
-        // Update user balance with refund
-        const previousBalance = user.walletBalance
-        user.walletBalance += refundAmount
-        await user.save()
-        console.log(`Updated user ${user._id} wallet balance from ${previousBalance} to ${user.walletBalance}`)
-
-        // *** PLAYFAB INTEGRATION: REFUND TO PLAYFAB INVENTORY ***
-        await updatePlayFabInventory(
-          user,
-          refundAmount, // Positive amount to add back
-          bet._id.toString(),
-          "bet_refund",
-        )
 
         // Update bet status
         bet.status = "refunded"
         bet.processed = true
         await bet.save()
+
         // Emit wallet update event
         if (io) {
           io.emit("wallet_update", {
             userId: user._id,
-            newBalance: user.walletBalance,
-            previousBalance: previousBalance,
+            newBalance: newBalanceAfterRefund,
+            previousBalance: user.walletBalance - refundAmount, // Previous balance before this refund
             change: refundAmount,
             reason: "bet_refund",
           })
@@ -936,10 +1029,12 @@ const processBetsForQuestion = async (questionId, outcome) => {
       }
       return // Exit early as all bets have been refunded
     }
+
     // Calculate total amounts for Yes and No bets
     const totalYesAmount = yesBets.reduce((sum, bet) => sum + bet.amount, 0)
     const totalNoAmount = noBets.reduce((sum, bet) => sum + bet.amount, 0)
     console.log(`Total Yes amount: ${totalYesAmount}, Total No amount: ${totalNoAmount}`)
+
     // Process each bet
     for (const bet of bets) {
       // Skip already processed bets
@@ -952,11 +1047,13 @@ const processBetsForQuestion = async (questionId, outcome) => {
         console.log(`User not found for bet ${bet._id}, skipping`)
         continue
       }
+
       // IMPORTANT: Log the bet choice and outcome for debugging
       console.log(`🎲 Processing bet ${bet._id}: User chose ${bet.choice}, outcome is ${outcome}`)
       // Determine if this bet is a winner
       const isWinner = String(bet.choice).toLowerCase() === String(outcome).toLowerCase()
       console.log(`🎲 Bet ${bet._id} is winner? ${isWinner}`)
+
       if (isWinner) {
         // Calculate the winning amount based on the proportion of this bet to total winning bets
         const winningBets = bet.choice === "Yes" ? yesBets : noBets
@@ -997,44 +1094,11 @@ const processBetsForQuestion = async (questionId, outcome) => {
           user.biggestWin = profit
           console.log(`New biggest win for user ${user._id}: ${profit}`)
         }
-
         // Update weekly stats if applicable
         await updateBiggestWinThisWeek(profit)
 
-        // Create win transaction
-        const winTransaction = new Transaction({
-          user: user._id,
-          type: "bet_win",
-          amount: winAmount,
-          bet: bet._id,
-          question: questionId,
-          balanceAfter: user.walletBalance + winAmount,
-          profit: profit, // Store the profit for easier querying
-        })
-        await winTransaction.save()
-
-        // Create platform fee transaction
-        const feeTransaction = new Transaction({
-          user: user._id,
-          type: "platform_fee",
-          amount: -platformFee,
-          bet: bet._id,
-          question: questionId,
-          balanceAfter: user.walletBalance + winAmount,
-          description: "Platform fee on winnings",
-        })
-        await feeTransaction.save()
-
-        // CRITICAL: Update user balance with winnings FIRST
-        const previousBalance = user.walletBalance
-        user.walletBalance += winAmount
-
-        // Save user with updated balance
-        await user.save()
-
-        console.log(
-          `💰 Updated user ${user._id} wallet balance from ${previousBalance} to ${user.walletBalance} after win of ${winAmount}`,
-        )
+        // Store previous balance for response
+        const previousBalance = user.walletBalance || 0
 
         // *** PLAYFAB INTEGRATION: ADD WINNINGS TO PLAYFAB INVENTORY ***
         console.log(`🎯 === CRITICAL: UPDATING PLAYFAB FOR BET WIN ===`)
@@ -1044,28 +1108,50 @@ const processBetsForQuestion = async (questionId, outcome) => {
         console.log(`🎯 Source: bet_win`)
 
         // ENSURE we wait for PlayFab update to complete
-        try {
-          const playFabWinResult = await updatePlayFabInventory(
-            user,
-            winAmount, // Positive amount for the win
-            bet._id.toString(),
-            "bet_win",
-          )
+        const playFabWinResult = await updatePlayFabInventory(
+          user,
+          winAmount, // Positive amount for the win
+          new mongoose.Types.ObjectId().toString(), // Unique transaction ID
+          "bet_win",
+        )
 
-          if (playFabWinResult.success) {
-            console.log(`✅ PlayFab win update successful for user ${user._id}`)
-            console.log(`✅ PlayFab result:`, JSON.stringify(playFabWinResult.playFabResult, null, 2))
-          } else {
-            console.error(`❌ PlayFab win update failed for user ${user._id}:`, playFabWinResult.error)
-            // Log the error but don't fail the entire process
-          }
-        } catch (playFabError) {
-          console.error(`❌ PlayFab win update threw error for user ${user._id}:`, playFabError.message)
+        if (!playFabWinResult.success) {
+          console.error(`❌ PlayFab win update failed for user ${user._id}:`, playFabWinResult.error)
           // Log the error but don't fail the entire process
+          continue
         }
 
-        console.log(`🎯 === PLAYFAB UPDATE FOR BET WIN COMPLETED ===`)
+        // The user.walletBalance is already updated by updatePlayFabInventory
+        const newBalanceAfterWin = playFabWinResult.newBalance
+        console.log(
+          `💰 Updated user ${user._id} wallet balance from ${previousBalance} to ${newBalanceAfterWin} after win of ${winAmount}`,
+        )
 
+        // Create win transaction
+        const winTransaction = new Transaction({
+          user: user._id,
+          type: "bet_win",
+          amount: winAmount,
+          bet: bet._id,
+          question: questionId,
+          balanceAfter: newBalanceAfterWin,
+          profit: profit, // Store the profit for easier querying
+        })
+        await winTransaction.save()
+
+        // Create platform fee transaction (for fee on winnings)
+        const feeTransaction = new Transaction({
+          user: user._id,
+          type: "platform_fee",
+          amount: -platformFee,
+          bet: bet._id,
+          question: questionId,
+          balanceAfter: newBalanceAfterWin,
+          description: "Platform fee on winnings",
+        })
+        await feeTransaction.save()
+
+        console.log(`🎯 === PLAYFAB UPDATE FOR BET WIN COMPLETED ===`)
         bet.status = "won"
 
         // Emit socket event for win
@@ -1081,7 +1167,7 @@ const processBetsForQuestion = async (questionId, outcome) => {
           // Also emit wallet update
           io.emit("wallet_update", {
             userId: user._id,
-            newBalance: user.walletBalance,
+            newBalance: newBalanceAfterWin,
             previousBalance: previousBalance,
             change: winAmount,
             platformFee: platformFee,
@@ -1095,7 +1181,6 @@ const processBetsForQuestion = async (questionId, outcome) => {
         console.log(`💸 User: ${user._id}`)
         console.log(`💸 Bet ${bet._id} lost. PlayFab balance was already deducted during bet placement.`)
         console.log(`💸 No further PlayFab action needed for loss.`)
-
         bet.status = "lost"
         bet.potentialPayout = 0 // Ensure losers have zero potential payout
       }
@@ -1266,13 +1351,16 @@ exports.getBetStats = async (req, res) => {
     })
     const activePlayersCount = activePlayers.length
     stats.activePlayers = activePlayersCount
+
     // Get total unique players
     const totalPlayers = await Bet.distinct("user")
     stats.totalPlayers = totalPlayers.length
+
     // Get total bets amount (sum of all bet amounts)
     const totalBetsAggregate = await Bet.aggregate([{ $group: { _id: null, total: { $sum: "$amount" } } }])
     const totalBetsAmount = totalBetsAggregate.length > 0 ? totalBetsAggregate[0].total : 0
     stats.totalBetsAmount = totalBetsAmount
+
     // Get total platform fees (sum of all platform fees)
     const totalFeesAggregate = await Transaction.aggregate([
       { $match: { type: "platform_fee" } },
@@ -1281,6 +1369,7 @@ exports.getBetStats = async (req, res) => {
     const totalPlatformFees = totalFeesAggregate.length > 0 ? totalFeesAggregate[0].total : 0
     stats.totalPlatformFees = totalPlatformFees
     await stats.save()
+
     // Emit updated stats via socket if available
     if (io) {
       console.log("Emitting betting stats with biggestWinThisWeek:", stats.biggestWinThisWeek)
@@ -1344,6 +1433,7 @@ exports.getPlatformFeeStats = async (req, res) => {
       { $group: { _id: null, total: { $sum: "$amount" } } },
     ])
     const totalFees = totalFeesAggregate.length > 0 ? Math.abs(totalFeesAggregate[0].total) : 0
+
     // Get platform fees by day for the last 7 days
     const sevenDaysAgo = new Date()
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
@@ -1364,6 +1454,7 @@ exports.getPlatformFeeStats = async (req, res) => {
       },
       { $sort: { _id: 1 } },
     ])
+
     res.status(200).json({
       success: true,
       stats: {
@@ -1387,6 +1478,7 @@ exports.handleCameraHolderChange = async (req, res) => {
   try {
     const { previousHolder, newHolder } = req.body
     console.log(`Camera holder changed from ${previousHolder} to ${newHolder}`)
+
     // If the camera holder changed to None or empty, resolve all active questions with "No" outcome
     if (!newHolder || newHolder === "None") {
       // Find all active questions
@@ -1401,8 +1493,10 @@ exports.handleCameraHolderChange = async (req, res) => {
         question.active = false
         question.resolvedReason = "Camera holder died or changed"
         await question.save()
+
         // Process all bets for this question
         await processBetsForQuestion(question._id, "No")
+
         // Emit socket event for question resolution
         if (io) {
           io.emit("questionResolved", {
@@ -1413,12 +1507,14 @@ exports.handleCameraHolderChange = async (req, res) => {
         }
       }
     }
+
     // Update the camera holder in the socket manager if available
     if (socketManager && typeof socketManager.updateCameraHolder === "function") {
       socketManager.updateCameraHolder({
         CameraHolderName: newHolder || "None",
       })
     }
+
     res.status(200).json({
       success: true,
       message: "Camera holder change processed successfully",
@@ -1648,6 +1744,29 @@ exports.placeBetWithPartialPayment = async (req, res) => {
     const betAmountAfterFee = amount - platformFee
     console.log(`Calculating platform fee: ${platformFee} (${platformFeePercentage * 100}% of ${amount})`)
     console.log(`Bet amount after fee: ${betAmountAfterFee}`)
+
+    // Store the previous balance for response
+    const previousBalance = user.walletBalance || 0
+
+    // *** PLAYFAB INTEGRATION: DEDUCT FROM PLAYFAB INVENTORY ***
+    // Deduct the full bet amount from PlayFab, as partial payment is handled externally
+    const playFabDeductResult = await updatePlayFabInventory(
+      user,
+      -amount,
+      new mongoose.Types.ObjectId().toString(), // Unique transaction ID
+      "bet_placement_partial",
+    )
+
+    if (!playFabDeductResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: playFabDeductResult.error || "Failed to deduct from PlayFab inventory for partial payment",
+      })
+    }
+
+    // The user.walletBalance is already updated by updatePlayFabInventory
+    const newBalanceAfterDeduction = playFabDeductResult.newBalance
+
     // Create the bet with the amount after fee
     console.log("Creating new bet")
     const bet = new Bet({
@@ -1664,21 +1783,11 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       potentialPayout: 0,
       processed: false,
     })
-    // Store the previous balance for response
-    const previousBalance = user.walletBalance || 0
-    // Update user's wallet balance - only deduct the wallet portion
-    console.log("Updating user wallet balance from", previousBalance, "to", previousBalance - walletDeduction)
-    user.walletBalance = previousBalance - walletDeduction
-    user.totalBets = (user.totalBets || 0) + 1
-    await user.save()
+    await bet.save()
 
-    // *** PLAYFAB INTEGRATION: DEDUCT FROM PLAYFAB INVENTORY ***
-    await updatePlayFabInventory(
-      user,
-      -amount, // Deduct the full bet amount from PlayFab
-      bet._id.toString(),
-      "bet_placement_partial",
-    )
+    // Update user's total bets count
+    user.totalBets = (user.totalBets || 0) + 1
+    await user.save() // Save user with updated totalBets
 
     // Create transaction record for the bet
     console.log("Creating bet transaction record")
@@ -1688,9 +1797,10 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       amount: -betAmountAfterFee, // Record the bet amount after fee
       bet: bet._id,
       question: question._id,
-      balanceAfter: user.walletBalance + platformFee, // Temporary balance after just the bet
+      balanceAfter: newBalanceAfterDeduction + platformFee, // Balance before platform fee deduction
     })
     await betTransaction.save()
+
     // Create transaction record for the platform fee
     console.log("Creating platform fee transaction record")
     const feeTransaction = new Transaction({
@@ -1699,9 +1809,10 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       amount: -platformFee, // Record the platform fee as a separate transaction
       bet: bet._id,
       question: question._id,
-      balanceAfter: user.walletBalance, // Final balance after both bet and fee
+      balanceAfter: newBalanceAfterDeduction, // Final balance after both bet and fee
     })
     await feeTransaction.save()
+
     // Create transaction record for the payment portion
     if (paymentNeeded > 0) {
       console.log("Creating payment transaction record")
@@ -1711,10 +1822,11 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         amount: paymentNeeded,
         bet: bet._id,
         question: question._id,
-        balanceAfter: user.walletBalance,
+        balanceAfter: newBalanceAfterDeduction,
       })
       await paymentTransaction.save()
     }
+
     // Update question stats with the bet amount after fee
     console.log("Updating question stats")
     if (choice === "Yes") {
@@ -1756,6 +1868,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       question.totalPlayers = (question.totalPlayers || 0) + 1
     }
     question.totalPlatformFees = (question.totalPlatformFees || 0) + platformFee
+
     // Recalculate percentages based on user counts instead of bet amounts
     const totalUsers = (question.yesUserCount || 0) + (question.noUserCount || 0)
     if (totalUsers > 0) {
@@ -1776,26 +1889,34 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       question.noPercentage = 50
     }
     await question.save()
-    // Calculate potential payout based on current odds
+
+    // Calculate potential payout based on current odds (using bet amounts)
     console.log("Calculating potential payout")
-    const odds =
-      choice === "Yes" ? question.noPercentage / question.yesPercentage : question.yesPercentage / question.noPercentage
-    // Calculate potential winnings with 5% platform fee
-    // Formula: payout = bet * 2 * 0.95
+    let odds = 1.0 // Default to 1:1 odds
+    if (choice === "Yes" && question.noBetAmount > 0 && question.yesBetAmount > 0) {
+      odds = question.noBetAmount / question.yesBetAmount
+    } else if (choice === "No" && question.yesBetAmount > 0 && question.noBetAmount > 0) {
+      odds = question.yesBetAmount / question.noBetAmount
+    }
+
+    // Calculate potential winnings with 5% platform fee on winnings
     const platformFeePercentageOnWinnings = 0.05
     const grossPotentialWinnings = betAmountAfterFee * odds
     const platformFeeOnWinnings = (betAmountAfterFee + grossPotentialWinnings) * platformFeePercentageOnWinnings
     const potentialPayout = betAmountAfterFee + grossPotentialWinnings - platformFeeOnWinnings
+
     console.log(`Potential payout calculation:`)
     console.log(`- Bet amount after initial fee: ${betAmountAfterFee}`)
     console.log(`- Odds: ${odds}`)
     console.log(`- Gross potential winnings: ${grossPotentialWinnings}`)
     console.log(`- Platform fee (${platformFeePercentageOnWinnings * 100}%): ${platformFeeOnWinnings}`)
     console.log(`- Net potential payout: ${potentialPayout}`)
+
     bet.potentialPayout = potentialPayout
     bet.grossPotentialPayout = betAmountAfterFee + grossPotentialWinnings
     bet.platformFeeOnWinnings = platformFeeOnWinnings
     await bet.save()
+
     // Try to match the bet
     console.log("Matching bet")
     try {
@@ -1804,6 +1925,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       console.error("Error matching bet:", matchError)
       // Continue even if matching fails
     }
+
     // Update global stats
     console.log("Updating global stats")
     try {
@@ -1812,6 +1934,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       console.error("Error updating stats:", statsError)
       // Continue even if stats update fails
     }
+
     // Emit socket events for real-time updates
     console.log("Emitting socket events")
     if (io) {
@@ -1842,25 +1965,25 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       // IMPORTANT: Emit wallet update event with real-time balance
       io.emit("wallet_update", {
         userId: userId,
-        newBalance: user.walletBalance,
+        newBalance: newBalanceAfterDeduction,
         previousBalance: previousBalance,
-        change: -walletDeduction, // Only report the wallet deduction as the change
+        change: -amount, // Report the full amount deducted from PlayFab
         platformFee: platformFee,
         paymentAmount: paymentNeeded, // Include the payment amount
       })
       // Add a specific bet_response event for immediate UI updates
       io.emit("bet_response", {
         success: true,
-        newBalance: user.walletBalance,
+        newBalance: newBalanceAfterDeduction,
         previousBalance: previousBalance,
-        change: -walletDeduction, // Only report the wallet deduction as the change
+        change: -amount, // Report the full amount deducted from PlayFab
         platformFee: platformFee,
         userId: userId,
         paymentAmount: paymentNeeded, // Include the payment amount
       })
     }
     console.log("Bet placed successfully")
-    console.log("New balance:", user.walletBalance)
+    console.log("New balance:", newBalanceAfterDeduction)
     console.log("Previous balance:", previousBalance)
     console.log("Wallet deduction:", walletDeduction)
     console.log("Payment amount:", paymentNeeded)
@@ -1872,7 +1995,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         originalAmount: amount,
         platformFee: platformFee,
       },
-      newBalance: user.walletBalance,
+      newBalance: newBalanceAfterDeduction,
       previousBalance: previousBalance,
       walletDeduction: walletDeduction,
       paymentAmount: paymentNeeded,
@@ -1916,15 +2039,12 @@ exports.placeBetWithPartialPayment = async (req, res) => {
 exports.debugController = async (req, res) => {
   try {
     console.log("=== DEBUG CONTROLLER CALLED ===")
-
     // Get some basic stats
     const totalBets = await Bet.countDocuments()
     const totalUsers = await User.countDocuments()
     const activeQuestions = await BetQuestion.countDocuments({ active: true })
-
     // Check PlayFab configuration
     const playFabConfigured = playFabService.isConfigured()
-
     res.status(200).json({
       success: true,
       debug: {
