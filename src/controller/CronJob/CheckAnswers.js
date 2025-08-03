@@ -5,7 +5,6 @@ const Bet = require("../../model/battingModel/Bet")
 const User = require("../../model/authModel/userModel.js")
 const Transaction = require("../../model/battingModel/Transaction")
 const BetStats = require("../../model/battingModel/BetStats")
-
 // 🔥 CRITICAL FIX: Import PlayFab service for inventory updates
 const playFabService = require("../../utils/playfab/playfab-service.js")
 
@@ -23,36 +22,89 @@ try {
   }
 }
 
-async function processOngoingBetQuestions() {
+// Helper function to update PlayFab inventory for all betting operations.
+// This function centralizes calls to the PlayFab service.
+// It also updates the MongoDB user balance after a successful PlayFab transaction.
+const updatePlayFabInventory = async (user, amount, transactionId, transactionDetails = {}) => {
   try {
-    console.log("=== PROCESSING ONGOING BET QUESTIONS ===")
+    console.log("🎯 === UPDATE PLAYFAB INVENTORY FUNCTION CALLED (CHECK ANSWER) ===")
+    console.log(`🎯 User ID: ${user._id}, Amount: ${amount}, Source: ${transactionDetails.source || "bet"}`)
 
-    // Find questions with status "ongoing"
-    const ongoingQuestions = await BetQuestion.find({
-      status: "ongoing",
+    if (!playFabService.isConfigured()) {
+      console.log("❌ PlayFab not configured, skipping inventory update.")
+      return { success: false, reason: "PlayFab not configured", newBalance: user.walletBalance } // Return current balance on config error
+    }
+
+    const entityId = playFabService.getPlayFabEntityId(user)
+    if (!entityId) {
+      console.log(`❌ No PlayFab Entity ID found for user ${user._id}, skipping inventory update.`)
+      return { success: false, reason: "No PlayFab Entity ID", newBalance: user.walletBalance } // Return current balance on entity ID error
+    }
+    console.log(`✅ Using PlayFab Entity ID: ${entityId} for user ${user._id}`)
+
+    const currentBalance = user.walletBalance // Use MongoDB balance as starting point
+    console.log(`📊 Current MongoDB balance before PlayFab update: ${currentBalance}`)
+
+    const result = await playFabService.processPaymentToPlayFab(user, amount, transactionId, transactionDetails)
+
+    if (result.success) {
+      console.log(`✅ Successfully processed PlayFab payment for user ${user._id}.`)
+      console.log("✅ PlayFab Result Details:", JSON.stringify(result.playFabResult, null, 2))
+
+      // After successful PlayFab transaction, fetch the latest balance from PlayFab
+      // and update MongoDB user balance to ensure consistency.
+      try {
+        const updatedInventory = await playFabService.getPlayerInventory(user)
+        const newBalance = updatedInventory.virtualCurrencyBalance || 0
+        console.log(`📊 PlayFab balance after update: ${newBalance} (Change: ${newBalance - currentBalance})`)
+
+        // CRITICAL FIX: Update MongoDB user balance to match PlayFab
+        user.walletBalance = newBalance
+        await user.save()
+        console.log(`✅ MongoDB user balance updated to match PlayFab: ${newBalance}`)
+        return { success: true, newBalance: newBalance } // Return the new balance
+      } catch (balanceError) {
+        console.error(`⚠️ Could not get updated balance from PlayFab or update MongoDB: ${balanceError.message}`)
+        // Even if MongoDB update fails, the PlayFab transaction might have succeeded.
+        // Return success based on PlayFab, but indicate potential sync issue.
+        return { success: true, newBalance: user.walletBalance, warning: "MongoDB balance sync failed" }
+      }
+    } else {
+      console.error(`❌ Failed to process PlayFab payment: ${result.error}`)
+      return { success: false, error: result.error, newBalance: user.walletBalance } // Return current balance on PlayFab failure
+    }
+  } catch (error) {
+    console.error("❌ Unhandled error in updatePlayFabInventory:", error.message)
+    return { success: false, error: error.message, newBalance: user.walletBalance } // Return current balance on unhandled error
+  }
+}
+
+// Renamed from processOngoingBetQuestions to clarify its role in processing resolved questions for payouts
+async function processResolvedQuestionsForPayouts() {
+  try {
+    console.log("=== PROCESSING RESOLVED BET QUESTIONS FOR PAYOUTS ===")
+    // Find questions with status "outcome_set_pending_payout"
+    const questionsToProcess = await BetQuestion.find({
+      status: "outcome_set_pending_payout",
+      resolved: true, // Ensure it's marked as resolved
+      correctChoice: { $ne: null, $ne: "" }, // Ensure outcome is set
     })
 
-    if (!ongoingQuestions.length) {
-      console.log("No ongoing questions to process.")
+    if (!questionsToProcess.length) {
+      console.log("No resolved questions pending payout to process.")
       return
     }
 
-    console.log(`Processing ${ongoingQuestions.length} ongoing questions.`)
+    console.log(`Processing ${questionsToProcess.length} resolved questions for payouts.`)
 
-    for (const question of ongoingQuestions) {
+    for (const question of questionsToProcess) {
       const { _id: questionId, correctChoice } = question
-      console.log(`Processing question ${questionId} with correctChoice: ${correctChoice || "not set"}`)
-
-      // CRITICAL FIX: If correctChoice is empty, skip this question for now
-      if (!correctChoice || correctChoice === "") {
-        console.log(`Question ${questionId} has no correctChoice set. Skipping for now.`)
-        continue
-      }
+      console.log(`Processing question ${questionId} with correctChoice: ${correctChoice}`)
 
       // Now process all bets for this question
       await processBetsForQuestion(questionId, correctChoice)
 
-      // Mark question as completed
+      // Mark question as completed after processing all bets
       question.status = "completed"
       await question.save()
       console.log(`Question ${questionId} marked as completed.`)
@@ -65,10 +117,9 @@ async function processOngoingBetQuestions() {
         })
       }
     }
-
-    console.log("=== PROCESSING COMPLETED ===")
+    console.log("=== PAYOUT PROCESSING COMPLETED ===")
   } catch (error) {
-    console.error("Error processing bets:", error)
+    console.error("Error processing resolved questions for payouts:", error)
   }
 }
 
@@ -79,13 +130,10 @@ async function processBetsForQuestion(questionId, outcome) {
     console.log(`Outcome: ${outcome}`)
     // Get all bets for this question
     const bets = await Bet.find({ question: questionId })
-
     console.log(`Processing ${bets.length} bets for question ${questionId} with outcome ${outcome}`)
-
     // First, check if there are both Yes and No bets
     const yesBets = bets.filter((bet) => bet.choice === "Yes")
     const noBets = bets.filter((bet) => bet.choice === "No")
-
     console.log(`Found ${yesBets.length} Yes bets and ${noBets.length} No bets`)
 
     // If there are only Yes bets or only No bets, refund all bets
@@ -93,6 +141,7 @@ async function processBetsForQuestion(questionId, outcome) {
       console.log(`Only ${yesBets.length === 0 ? "No" : "Yes"} bets found. Refunding all bets.`)
       for (const bet of bets) {
         if (bet.processed) continue // Skip already processed bets
+        // Refund the full original amount
         await refundBet(bet)
       }
       return // Exit early as all bets have been refunded
@@ -101,7 +150,6 @@ async function processBetsForQuestion(questionId, outcome) {
     // Calculate total amounts for Yes and No bets
     const totalYesAmount = yesBets.reduce((sum, bet) => sum + (bet.matchedAmount || bet.amount), 0)
     const totalNoAmount = noBets.reduce((sum, bet) => sum + (bet.matchedAmount || bet.amount), 0)
-
     console.log(`Total Yes amount: ${totalYesAmount}, Total No amount: ${totalNoAmount}`)
 
     // CRITICAL FIX: Ensure all bets have their potential payouts calculated
@@ -116,7 +164,7 @@ async function processBetsForQuestion(questionId, outcome) {
 
       // Determine if this bet is a winner
       const isWinner = String(bet.choice).toLowerCase() === String(outcome).toLowerCase()
-      console.log(`Bet ${bet._id}: User chose ${bet.choice}, outcome is ${outcome}, isWinner: ${isWinner}`)
+      console.log(`🎲 Bet ${bet._id}: User chose ${bet.choice}, outcome is ${outcome}, isWinner: ${isWinner}`)
 
       // Handle partially matched bets
       if (bet.matchedAmount < bet.amount) {
@@ -145,7 +193,6 @@ async function ensurePotentialPayoutsCalculated(bets, totalYesAmount, totalNoAmo
   for (const bet of bets) {
     // Skip already processed bets
     if (bet.processed) continue
-
     // If potential payout is already set and non-zero, skip
     if (bet.potentialPayout > 0) continue
 
@@ -160,9 +207,9 @@ async function ensurePotentialPayoutsCalculated(bets, totalYesAmount, totalNoAmo
 
     // Calculate potential winnings based on proportion of opposite pool
     const platformFeePercentageOnWin = 0.05
-    const grossPotentialWin = totalOppositeSideBets * betProportion + matchedAmount
+    const grossPotentialWin = totalOppositeSideBets * betProportion + matchedAmount // This is the total amount (stake + profit from losing pool)
     const platformFee = grossPotentialWin * platformFeePercentageOnWin
-    const potentialPayout = grossPotentialWin - platformFee
+    const potentialPayout = grossPotentialWin - platformFee // This is the final amount to be paid out
 
     console.log(`Calculating potential payout for bet ${bet._id}:`)
     console.log(`- Choice: ${bet.choice}, Matched amount: ${matchedAmount}`)
@@ -192,13 +239,12 @@ async function processBetWin(bet) {
     // Use the potential payout that was calculated earlier
     const winAmount = bet.potentialPayout
     const matchedAmount = bet.matchedAmount > 0 ? bet.matchedAmount : bet.amount
-
     // Calculate the actual profit (winnings minus the original matched bet amount)
     const profit = winAmount - matchedAmount
 
     console.log(`Win processing for bet ${bet._id}:`)
     console.log(`- Matched bet amount: ${matchedAmount}`)
-    console.log(`- Win amount: ${winAmount}`)
+    console.log(`- Win amount (potentialPayout): ${winAmount}`) // Added log
     console.log(`- Profit: ${profit}`)
 
     // Update bet status
@@ -209,73 +255,51 @@ async function processBetWin(bet) {
     if (profit > (user.biggestWin || 0)) {
       user.biggestWin = profit
       console.log(`New biggest win for user ${user._id}: ${profit}`)
-
       // Update biggest win this week in stats
       await updateBiggestWinThisWeek(profit)
     }
 
-    // Create win transaction
+    // 🔥 CRITICAL FIX: Update PlayFab inventory FIRST to get the new balance
+    console.log(`🎮 Updating PlayFab inventory for user ${user._id} with win amount: ${winAmount}`)
+    const playFabResult = await updatePlayFabInventory(
+      user,
+      winAmount, // Positive amount for addition
+      `bet-win-${bet._id}`,
+      { source: "bet_win", betId: bet._id, questionId: bet.question },
+    )
+
+    if (!playFabResult.success) {
+      console.error(`❌ PlayFab inventory update failed for bet win:`, playFabResult.error)
+      // Mark bet as error and return
+      bet.processed = true
+      bet.status = "error"
+      await bet.save()
+      return
+    }
+
+    const newBalance = playFabResult.newBalance // Get the new balance from PlayFab update
+
+    // Create win transaction AFTER PlayFab update and with the correct balanceAfter
     const winTransaction = new Transaction({
       user: user._id,
       type: "bet_win",
       amount: winAmount,
       bet: bet._id,
       question: bet.question,
-      balanceAfter: user.walletBalance + winAmount,
+      balanceAfter: newBalance, // Set balanceAfter here
       profit: profit, // Store the profit for easier querying
     })
 
     try {
-      // Use a transaction to ensure atomic updates
       const session = await mongoose.startSession()
       await session.withTransaction(async () => {
-        // Update user balance with winnings
-        const previousBalance = user.walletBalance || 0
-        user.walletBalance = previousBalance + winAmount
-        user.totalWins = (user.totalWins || 0) + winAmount
-
-        // Save all changes
-        await user.save({ session })
         await bet.save({ session })
-        await winTransaction.save({ session })
-
-        console.log(
-          `Updated user ${user._id} wallet balance from ${previousBalance} to ${user.walletBalance} after win of ${winAmount}`,
-        )
+        await winTransaction.save({ session }) // This should now pass validation
       })
       session.endSession()
 
-      // 🔥 CRITICAL FIX: Update PlayFab inventory for bet wins
-      console.log(`🎮 Updating PlayFab inventory for user ${user._id} with win amount: ${winAmount}`)
-      try {
-        const playFabResult = await playFabService.processPaymentToPlayFab(
-          user,
-          winAmount, // Positive amount for addition
-          `bet-win-${bet._id}`,
-          { source: "bet_win", betId: bet._id, questionId: bet.question },
-        )
-
-        if (playFabResult.success) {
-          console.log(`✅ PlayFab inventory updated successfully for bet win`)
-          console.log(`   - Amount added: ${winAmount}`)
-          console.log(`   - Method: ${playFabResult.playFabResult.method}`)
-        } else {
-          console.error(`❌ PlayFab inventory update failed for bet win:`, playFabResult.error)
-        }
-      } catch (playFabError) {
-        console.error(`❌ Error updating PlayFab inventory for bet win:`, playFabError)
-      }
-
-      // Double-check that the update was successful
-      const updatedUser = await User.findById(user._id)
-      if (updatedUser.walletBalance !== user.walletBalance) {
-        console.error(
-          `ERROR: User balance update verification failed. Expected: ${user.walletBalance}, Actual: ${updatedUser.walletBalance}`,
-        )
-        // Try again with a different approach
-        await User.updateOne({ _id: user._id }, { $inc: { walletBalance: winAmount, totalWins: winAmount } })
-        console.log(`Attempted alternative update method for user ${user._id}`)
-      }
+      console.log(`✅ PlayFab inventory updated successfully for bet win`)
+      console.log(`Updated user ${user._id} wallet balance to ${newBalance} after win of ${winAmount}`)
 
       // Emit socket events for real-time updates
       if (io) {
@@ -283,30 +307,22 @@ async function processBetWin(bet) {
           userId: user._id,
           amount: winAmount,
           profit: profit,
+          grossAmount: bet.grossWinAmount, // Use stored gross amount
+          platformFee: bet.platformFeeOnWin, // Use stored platform fee
           questionId: bet.question,
         })
-
         io.emit("wallet_update", {
           userId: user._id,
-          newBalance: user.walletBalance,
-          previousBalance: user.walletBalance - winAmount,
+          newBalance: newBalance,
+          previousBalance: newBalance - winAmount, // Calculate previous for emit
           change: winAmount,
+          platformFee: bet.platformFeeOnWin,
+          grossWinAmount: bet.grossWinAmount,
         })
       }
     } catch (error) {
-      console.error(`Error processing win for bet ${bet._id}:`, error)
-      // Try a fallback approach
-      try {
-        user.walletBalance = (user.walletBalance || 0) + winAmount
-        user.totalWins = (user.totalWins || 0) + winAmount
-        await user.save()
-        await bet.save()
-        await winTransaction.save()
-
-        console.log(`Fallback: Updated user ${user._id} wallet balance to ${user.walletBalance}`)
-      } catch (fallbackError) {
-        console.error(`Fallback error for bet ${bet._id}:`, fallbackError)
-      }
+      console.error(`Error saving transaction or bet for bet ${bet._id}:`, error)
+      throw error
     }
   } catch (error) {
     console.error(`Error processing win for bet ${bet._id}:`, error)
@@ -325,7 +341,6 @@ async function processBetLoss(bet) {
     const user = await User.findById(bet.user)
     if (user) {
       console.log(`Bet ${bet._id} marked as lost for user ${user._id}`)
-
       // Emit socket event for bet loss
       if (io) {
         io.emit("bet_loss", {
@@ -356,56 +371,57 @@ async function refundBet(bet) {
     }
 
     // Refund the full original amount
-    const refundAmount = bet.amount
+    const refundAmount = bet.originalAmount // FIXED: Use originalAmount for full refund
+    if (typeof refundAmount !== "number" || isNaN(refundAmount)) {
+      console.error(`Invalid refundAmount for bet ${bet._id}: ${refundAmount}`)
+      bet.processed = true
+      bet.status = "error"
+      await bet.save()
+      return
+    }
+
     console.log(`Refunding ${refundAmount} to user ${user._id} for unmatched bet`)
 
-    // Create refund transaction
+    // 🔥 CRITICAL FIX: Update PlayFab inventory FIRST to get the new balance
+    console.log(`🎮 Updating PlayFab inventory for user ${user._id} with refund amount: ${refundAmount}`)
+    const playFabResult = await updatePlayFabInventory(
+      user,
+      refundAmount, // Positive amount for addition
+      `bet-refund-${bet._id}`,
+      { source: "bet_refund", betId: bet._id, questionId: bet.question },
+    )
+
+    if (!playFabResult.success) {
+      console.error(`❌ PlayFab inventory update failed for bet refund:`, playFabResult.error)
+      // Mark bet as error and return
+      bet.processed = true
+      bet.status = "error"
+      await bet.save()
+      return
+    }
+
+    const newBalance = playFabResult.newBalance // Get the new balance from PlayFab update
+
+    // Create refund transaction AFTER PlayFab update and with the correct balanceAfter
     const refundTransaction = new Transaction({
       user: user._id,
       type: "bet_refund",
       amount: refundAmount,
       bet: bet._id,
       question: bet.question,
-      balanceAfter: user.walletBalance + refundAmount,
+      balanceAfter: newBalance, // Set balanceAfter here
       description: "Refund for unmatched bet (no opposing bets)",
     })
 
     try {
-      // Use a transaction to ensure atomic updates
       const session = await mongoose.startSession()
       await session.withTransaction(async () => {
-        // Update user balance with refund
-        const previousBalance = user.walletBalance || 0
-        user.walletBalance = previousBalance + refundAmount
-
-        // Save all changes
-        await user.save({ session })
-        await refundTransaction.save({ session })
-
-        console.log(
-          `Updated user ${user._id} wallet balance from ${previousBalance} to ${user.walletBalance} after refund of ${refundAmount}`,
-        )
+        await refundTransaction.save({ session }) // This should now pass validation
       })
       session.endSession()
 
-      // 🔥 CRITICAL FIX: Update PlayFab inventory for refunds
-      console.log(`🎮 Updating PlayFab inventory for user ${user._id} with refund amount: ${refundAmount}`)
-      try {
-        const playFabResult = await playFabService.processPaymentToPlayFab(
-          user,
-          refundAmount, // Positive amount for addition
-          `bet-refund-${bet._id}`,
-          { source: "bet_refund", betId: bet._id, questionId: bet.question },
-        )
-
-        if (playFabResult.success) {
-          console.log(`✅ PlayFab inventory updated successfully for bet refund`)
-        } else {
-          console.error(`❌ PlayFab inventory update failed for bet refund:`, playFabResult.error)
-        }
-      } catch (playFabError) {
-        console.error(`❌ Error updating PlayFab inventory for bet refund:`, playFabError)
-      }
+      console.log(`✅ PlayFab inventory updated successfully for bet refund`)
+      console.log(`Updated user ${user._id} wallet balance to ${newBalance} after refund of ${refundAmount}`)
 
       // Update bet status
       bet.status = "refunded"
@@ -416,30 +432,19 @@ async function refundBet(bet) {
       if (io) {
         io.emit("wallet_update", {
           userId: user._id,
-          newBalance: user.walletBalance,
-          previousBalance: user.walletBalance - refundAmount,
+          newBalance: newBalance,
+          previousBalance: newBalance - refundAmount, // Calculate previous for emit
           change: refundAmount,
           reason: "bet_refund",
         })
       }
     } catch (error) {
-      console.error(`Error processing refund for bet ${bet._id}:`, error)
-      // Try a fallback approach
-      try {
-        user.walletBalance = (user.walletBalance || 0) + refundAmount
-        await user.save()
-        bet.status = "refunded"
-        bet.processed = true
-        await bet.save()
-        await refundTransaction.save()
-
-        console.log(`Fallback: Updated user ${user._id} wallet balance to ${user.walletBalance} after refund`)
-      } catch (fallbackError) {
-        console.error(`Fallback error for bet ${bet._id} refund:`, fallbackError)
-      }
+      console.error(`Error saving transaction or bet for bet ${bet._id}:`, error)
+      throw error
     }
   } catch (error) {
     console.error(`Error refunding bet ${bet._id}:`, error)
+    throw error // Re-throw to propagate the error
   }
 }
 
@@ -449,84 +454,75 @@ async function refundPartialBet(bet, unmatchedAmount) {
     const user = await User.findById(bet.user)
     if (!user) {
       console.log(`User not found for bet ${bet._id}, skipping partial refund`)
+      bet.processed = true
+      bet.status = "error"
+      await bet.save()
+      return
+    }
+
+    if (typeof unmatchedAmount !== "number" || isNaN(unmatchedAmount)) {
+      console.error(`Invalid unmatchedAmount for bet ${bet._id}: ${unmatchedAmount}`)
+      bet.processed = true
+      bet.status = "error"
+      await bet.save()
       return
     }
 
     console.log(`Processing partial refund of ${unmatchedAmount} for bet ${bet._id}`)
 
-    // Create refund transaction for unmatched amount
+    // 🔥 CRITICAL FIX: Update PlayFab inventory FIRST to get the new balance
+    console.log(`🎮 Updating PlayFab inventory for user ${user._id} with partial refund amount: ${unmatchedAmount}`)
+    const playFabResult = await updatePlayFabInventory(
+      user,
+      unmatchedAmount, // Positive amount for addition
+      `bet-partial-refund-${bet._id}`,
+      { source: "bet_partial_refund", betId: bet._id, questionId: bet.question },
+    )
+
+    if (!playFabResult.success) {
+      console.error(`❌ PlayFab inventory update failed for partial refund:`, playFabResult.error)
+      // Mark bet as error and return
+      bet.processed = true
+      bet.status = "error"
+      await bet.save()
+      return
+    }
+
+    const newBalance = playFabResult.newBalance // Get the new balance from PlayFab update
+
+    // Create refund transaction for unmatched amount AFTER PlayFab update and with the correct balanceAfter
     const refundTransaction = new Transaction({
       user: user._id,
       type: "bet_partial_refund",
-      amount: unmatchedAmount,
+      amount: unmatchedAmount, // Refund the exact unmatched amount
       bet: bet._id,
       question: bet.question,
-      balanceAfter: user.walletBalance + unmatchedAmount,
+      balanceAfter: newBalance, // Set balanceAfter here
       description: "Refund for unmatched portion of bet",
     })
 
-    try {
-      // Use a transaction to ensure atomic updates
-      const session = await mongoose.startSession()
-      await session.withTransaction(async () => {
-        // Update user balance with refund
-        const previousBalance = user.walletBalance || 0
-        user.walletBalance = previousBalance + unmatchedAmount
+    const session = await mongoose.startSession()
+    await session.withTransaction(async () => {
+      await refundTransaction.save({ session }) // This should now pass validation
+    })
+    session.endSession()
 
-        // Save all changes
-        await user.save({ session })
-        await refundTransaction.save({ session })
+    console.log(`✅ PlayFab inventory updated successfully for partial refund`)
+    console.log(`Updated user ${user._id} wallet balance to ${newBalance} after partial refund of ${unmatchedAmount}`)
 
-        console.log(
-          `Updated user ${user._id} wallet balance from ${previousBalance} to ${user.walletBalance} after partial refund of ${unmatchedAmount}`,
-        )
+    // Emit wallet update event
+    if (io) {
+      io.emit("wallet_update", {
+        userId: user._id,
+        newBalance: newBalance,
+        previousBalance: newBalance - unmatchedAmount, // Calculate previous for emit
+        change: unmatchedAmount,
+        reason: "bet_partial_refund",
       })
-      session.endSession()
-
-      // 🔥 CRITICAL FIX: Update PlayFab inventory for partial refunds
-      console.log(`🎮 Updating PlayFab inventory for user ${user._id} with partial refund amount: ${unmatchedAmount}`)
-      try {
-        const playFabResult = await playFabService.processPaymentToPlayFab(
-          user,
-          unmatchedAmount, // Positive amount for addition
-          `bet-partial-refund-${bet._id}`,
-          { source: "bet_partial_refund", betId: bet._id, questionId: bet.question },
-        )
-
-        if (playFabResult.success) {
-          console.log(`✅ PlayFab inventory updated successfully for partial refund`)
-        } else {
-          console.error(`❌ PlayFab inventory update failed for partial refund:`, playFabResult.error)
-        }
-      } catch (playFabError) {
-        console.error(`❌ Error updating PlayFab inventory for partial refund:`, playFabError)
-      }
-
-      // Emit wallet update event
-      if (io) {
-        io.emit("wallet_update", {
-          userId: user._id,
-          newBalance: user.walletBalance,
-          previousBalance: user.walletBalance - unmatchedAmount,
-          change: unmatchedAmount,
-          reason: "bet_partial_refund",
-        })
-      }
-    } catch (error) {
-      console.error(`Error processing partial refund for bet ${bet._id}:`, error)
-      // Try a fallback approach
-      try {
-        user.walletBalance = (user.walletBalance || 0) + unmatchedAmount
-        await user.save()
-        await refundTransaction.save()
-
-        console.log(`Fallback: Updated user ${user._id} wallet balance to ${user.walletBalance} after partial refund`)
-      } catch (fallbackError) {
-        console.error(`Fallback error for bet ${bet._id} partial refund:`, fallbackError)
-      }
     }
   } catch (error) {
     console.error(`Error processing partial refund for bet ${bet._id}:`, error)
+    throw error
   }
 }
 
@@ -534,23 +530,19 @@ async function refundPartialBet(bet, unmatchedAmount) {
 async function updateBiggestWinThisWeek(winAmount) {
   try {
     const now = new Date()
-
     // Find or create stats for the current week
     let stats = await BetStats.findOne({
       weekStartDate: { $lte: now },
       weekEndDate: { $gte: now },
     })
-
     if (!stats) {
       // Calculate week start and end dates
       const startOfWeek = new Date(now)
       startOfWeek.setDate(now.getDate() - now.getDay())
       startOfWeek.setHours(0, 0, 0, 0)
-
       const endOfWeek = new Date(startOfWeek)
       endOfWeek.setDate(startOfWeek.getDate() + 6)
       endOfWeek.setHours(23, 59, 59, 999)
-
       stats = new BetStats({
         totalBetsAmount: 0,
         totalPlatformFees: 0,
@@ -562,13 +554,11 @@ async function updateBiggestWinThisWeek(winAmount) {
         streamId: "default-stream",
       })
     }
-
     // Update biggest win if the new win is larger
     if (winAmount > (stats.biggestWinThisWeek || 0)) {
       console.log(`New biggest win this week: ${winAmount} (previous: ${stats.biggestWinThisWeek || 0})`)
       stats.biggestWinThisWeek = winAmount
       await stats.save()
-
       // Broadcast the new biggest win to all clients
       if (io) {
         io.emit("biggest_win_update", {
@@ -583,10 +573,10 @@ async function updateBiggestWinThisWeek(winAmount) {
 
 // Run every minute
 cron.schedule("* * * * *", () => {
-  console.log("Running cron job to process ongoing bet questions...")
-  processOngoingBetQuestions()
+  console.log("Running cron job to process resolved bet questions for payouts...")
+  processResolvedQuestionsForPayouts()
 })
 
 module.exports = {
-  processOngoingBetQuestions,
+  processResolvedQuestionsForPayouts, // Export the renamed function
 }
