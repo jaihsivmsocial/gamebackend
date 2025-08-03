@@ -1,4 +1,4 @@
 node_modules
 .env
 .log
-.combined.logsrc/utils/logs/combined.log
+src/utils/logs/combined.log
