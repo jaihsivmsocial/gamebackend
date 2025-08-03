@@ -1,5 +1,4 @@
 require("dotenv").config()
-
 const Bet = require("../../model/battingModel/Bet.js")
 const BetQuestion = require("../../model/battingModel/BetQuestion.js")
 const User = require("../../model/authModel/userModel.js")
@@ -13,7 +12,6 @@ const playFabService = require("../../utils/playfab/playfab-service.js")
 
 let io
 let socketManager
-
 try {
   socketManager = require("../socket/socket-manager.js")
   io = socketManager.io
@@ -69,7 +67,6 @@ const updatePlayFabInventory = async (user, amount, transactionId, source = "bet
       console.log(`❌ No PlayFab Entity ID found for user ${user._id}, skipping inventory update.`)
       return { success: false, reason: "No PlayFab Entity ID" }
     }
-
     console.log(`✅ Using PlayFab Entity ID: ${entityId} for user ${user._id}`)
 
     // 3. Get current balance from PlayFab for logging purposes.
@@ -106,7 +103,6 @@ const updatePlayFabInventory = async (user, amount, transactionId, source = "bet
     } else {
       console.error(`❌ Failed to update PlayFab inventory: ${result.error}`)
     }
-
     return result
   } catch (error) {
     console.error("❌ Unhandled error in updatePlayFabInventory:", error.message)
@@ -126,6 +122,7 @@ exports.getUserWalletBalance = async (req, res) => {
         isAuthenticated: false,
       })
     }
+
     const userId = req.user.id || req.user._id || req.user.userId
     if (!userId) {
       console.log("User ID not found in request. Returning default balance.")
@@ -135,6 +132,7 @@ exports.getUserWalletBalance = async (req, res) => {
         isAuthenticated: false,
       })
     }
+
     // Find user with actual balance
     const user = await User.findById(userId)
     if (!user) {
@@ -145,6 +143,7 @@ exports.getUserWalletBalance = async (req, res) => {
         isAuthenticated: false,
       })
     }
+
     console.log("Returning actual wallet balance:", user.walletBalance || 0)
     // Return actual user balance
     res.status(200).json({
@@ -169,6 +168,7 @@ exports.placeBet = async (req, res) => {
   try {
     console.log("=== PLACE BET START ===")
     const { questionId, choice, amount, streamId } = req.body
+
     // Add more robust user ID extraction with fallbacks
     let userId
     if (req.user) {
@@ -181,6 +181,7 @@ exports.placeBet = async (req, res) => {
         message: "User ID not found in request",
       })
     }
+
     console.log("Received bet request:", {
       questionId,
       choice,
@@ -188,6 +189,7 @@ exports.placeBet = async (req, res) => {
       streamId,
       userId,
     })
+
     // Validate bet amount
     if (!amount || amount <= 0) {
       return res.status(400).json({
@@ -195,6 +197,7 @@ exports.placeBet = async (req, res) => {
         message: "Invalid bet amount",
       })
     }
+
     // Validate streamId
     if (!streamId) {
       return res.status(400).json({
@@ -202,6 +205,7 @@ exports.placeBet = async (req, res) => {
         message: "Stream ID is required",
       })
     }
+
     // Find user with actual balance
     console.log("Finding user with ID:", userId)
     const user = await User.findById(userId)
@@ -214,6 +218,7 @@ exports.placeBet = async (req, res) => {
     }
     console.log("Found user:", user.username || user.email || userId)
     console.log("Current wallet balance:", user.walletBalance || 0)
+
     // Check if user has enough balance
     if ((user.walletBalance || 0) < amount) {
       // Return insufficient balance with the exact amount needed
@@ -225,6 +230,7 @@ exports.placeBet = async (req, res) => {
         amountNeeded: amount - (user.walletBalance || 0),
       })
     }
+
     // Find the question - handle both ObjectId and string ID formats
     let question = null
     try {
@@ -299,6 +305,7 @@ exports.placeBet = async (req, res) => {
         error: error.message,
       })
     }
+
     if (!question) {
       // Create a debug endpoint to check what questions exist
       const allQuestions = await BetQuestion.find().sort({ createdAt: -1 }).limit(5)
@@ -315,6 +322,7 @@ exports.placeBet = async (req, res) => {
         message: "Bet question not found. Please refresh and try again.",
       })
     }
+
     // Check if question is still active
     if (!question.active || question.resolved) {
       return res.status(400).json({
@@ -322,6 +330,7 @@ exports.placeBet = async (req, res) => {
         message: "This betting round has ended",
       })
     }
+
     // Check if countdown has expired
     if (new Date() > question.endTime) {
       return res.status(400).json({
@@ -329,12 +338,14 @@ exports.placeBet = async (req, res) => {
         message: "Betting time has expired for this question",
       })
     }
+
     // Calculate platform fee (5% of bet amount)
     const platformFeePercentage = 0.05
     const platformFee = Math.round(amount * platformFeePercentage)
     const betAmountAfterFee = amount - platformFee
     console.log(`Calculating platform fee: ${platformFee} (${platformFeePercentage * 100}% of ${amount})`)
     console.log(`Bet amount after fee: ${betAmountAfterFee}`)
+
     // Create the bet with the amount after fee
     console.log("Creating new bet")
     const bet = new Bet({
@@ -355,6 +366,7 @@ exports.placeBet = async (req, res) => {
 
     // Store the previous balance for response
     const previousBalance = user.walletBalance || 0
+
     // Update user's wallet balance
     console.log("Updating user wallet balance from", previousBalance, "to", previousBalance - amount)
     user.walletBalance = previousBalance - amount
@@ -380,6 +392,7 @@ exports.placeBet = async (req, res) => {
       balanceAfter: user.walletBalance + platformFee, // Temporary balance after just the bet
     })
     await betTransaction.save()
+
     // Create transaction record for the platform fee
     console.log("Creating platform fee transaction record")
     const feeTransaction = new Transaction({
@@ -391,6 +404,7 @@ exports.placeBet = async (req, res) => {
       balanceAfter: user.walletBalance, // Final balance after both bet and fee
     })
     await feeTransaction.save()
+
     // Update question stats with the bet amount after fee
     console.log("Updating question stats")
     if (choice === "Yes") {
@@ -421,6 +435,7 @@ exports.placeBet = async (req, res) => {
       }
     }
     question.totalBetAmount = (question.totalBetAmount || 0) + betAmountAfterFee
+
     // Check if this user has already bet on this question (regardless of choice)
     const existingBet = await Bet.findOne({
       user: userId,
@@ -432,6 +447,7 @@ exports.placeBet = async (req, res) => {
       question.totalPlayers = (question.totalPlayers || 0) + 1
     }
     question.totalPlatformFees = (question.totalPlatformFees || 0) + platformFee
+
     // Recalculate percentages based on user counts instead of bet amounts
     const totalUsers = (question.yesUserCount || 0) + (question.noUserCount || 0)
     if (totalUsers > 0) {
@@ -452,6 +468,7 @@ exports.placeBet = async (req, res) => {
       question.noPercentage = 50
     }
     await question.save()
+
     // Calculate potential payout based on current odds
     console.log("Calculating potential payout")
     const odds =
@@ -468,10 +485,12 @@ exports.placeBet = async (req, res) => {
     console.log(`- Gross potential winnings: ${grossPotentialWinnings}`)
     console.log(`- Platform fee (${platformFeePercentageOnWinnings * 100}%): ${platformFeeOnWinnings}`)
     console.log(`- Net potential payout: ${potentialPayout}`)
+
     bet.potentialPayout = potentialPayout
     bet.grossPotentialPayout = betAmountAfterFee + grossPotentialWinnings
     bet.platformFeeOnWinnings = platformFeeOnWinnings
     await bet.save()
+
     // Try to match the bet
     console.log("Matching bet")
     try {
@@ -480,14 +499,16 @@ exports.placeBet = async (req, res) => {
       console.error("Error matching bet:", matchError)
       // Continue even if matching fails
     }
+
     // Update global stats
     console.log("Updating global stats")
     try {
-      await updateBetStats(betAmountAfterFee, platformFee)
+      await updateBetStats(betAmountAfterFee, platformFee, streamId) // Pass streamId here
     } catch (statsError) {
       console.error("Error updating stats:", statsError)
       // Continue even if stats update fails
     }
+
     // Emit socket events for real-time updates
     console.log("Emitting socket events")
     if (io) {
@@ -533,9 +554,11 @@ exports.placeBet = async (req, res) => {
         userId: userId,
       })
     }
+
     console.log("Bet placed successfully")
     console.log("New balance:", user.walletBalance)
     console.log("Previous balance:", previousBalance)
+
     res.status(201).json({
       success: true,
       bet: {
@@ -591,6 +614,7 @@ exports.resetBalance = async (req, res) => {
         message: "Authentication required",
       })
     }
+
     const userId = req.user.id || req.user._id || req.user.userId
     if (!userId) {
       return res.status(400).json({
@@ -598,6 +622,7 @@ exports.resetBalance = async (req, res) => {
         message: "User ID not found in request",
       })
     }
+
     // Find the user
     const user = await User.findById(userId)
     if (!user) {
@@ -606,14 +631,18 @@ exports.resetBalance = async (req, res) => {
         message: "User not found",
       })
     }
+
     // Store previous balance for response
     const previousBalance = user.walletBalance || 0
+
     // Get the amount from request body or use 0 as default
     const resetAmount = req.body.amount !== undefined ? Number(req.body.amount) : 0
     console.log(`Resetting wallet balance for user ${userId} from ${previousBalance} to ${resetAmount}`)
+
     // Reset the balance to the specified amount or 0
     user.walletBalance = resetAmount
     await user.save()
+
     // Emit wallet update event
     if (io) {
       io.emit("wallet_update", {
@@ -623,6 +652,7 @@ exports.resetBalance = async (req, res) => {
         change: resetAmount - previousBalance,
       })
     }
+
     res.status(200).json({
       success: true,
       message: `Wallet balance reset to ${resetAmount}`,
@@ -648,6 +678,7 @@ exports.updateWalletBalance = async (req, res) => {
         message: "Authentication required",
       })
     }
+
     const userId = req.user.id || req.user._id || req.user.userId
     if (!userId) {
       return res.status(400).json({
@@ -655,6 +686,7 @@ exports.updateWalletBalance = async (req, res) => {
         message: "User ID not found in request",
       })
     }
+
     const { amount } = req.body
     if (amount === undefined) {
       return res.status(400).json({
@@ -662,6 +694,7 @@ exports.updateWalletBalance = async (req, res) => {
         message: "Amount is required",
       })
     }
+
     // Find the user
     const user = await User.findById(userId)
     if (!user) {
@@ -670,12 +703,16 @@ exports.updateWalletBalance = async (req, res) => {
         message: "User not found",
       })
     }
+
     // Store previous balance for response
     const previousBalance = user.walletBalance || 0
+
     // Update the balance with the provided amount
     user.walletBalance = Number(amount)
     await user.save()
+
     console.log(`Updated wallet balance for user ${userId} from ${previousBalance} to ${user.walletBalance}`)
+
     // Emit wallet update event
     if (io) {
       io.emit("wallet_update", {
@@ -685,6 +722,7 @@ exports.updateWalletBalance = async (req, res) => {
         change: user.walletBalance - previousBalance,
       })
     }
+
     res.status(200).json({
       success: true,
       newBalance: user.walletBalance,
@@ -704,6 +742,7 @@ exports.updateWalletBalance = async (req, res) => {
 const matchBet = async (newBet, question) => {
   try {
     const oppositeChoice = newBet.choice === "Yes" ? "No" : "Yes"
+
     // Find unmatched or partially matched bets with the opposite choice
     const oppositeBets = await Bet.find({
       question: question._id,
@@ -711,23 +750,30 @@ const matchBet = async (newBet, question) => {
       status: { $in: ["pending", "partially_matched"] },
       processed: false,
     }).sort({ timestamp: 1 }) // First in, first matched
+
     let remainingAmount = newBet.amount // This is already the amount after fee
     let matchedAmount = 0
+
     // Try to match with opposite bets
     for (const oppositeBet of oppositeBets) {
       if (remainingAmount <= 0) break
+
       const oppositeUnmatchedAmount = oppositeBet.amount - (oppositeBet.matchedAmount || 0)
+
       if (oppositeUnmatchedAmount > 0) {
         const amountToMatch = Math.min(remainingAmount, oppositeUnmatchedAmount)
+
         // Update the opposite bet
         oppositeBet.matchedAmount = (oppositeBet.matchedAmount || 0) + amountToMatch
         oppositeBet.status = oppositeBet.matchedAmount === oppositeBet.amount ? "matched" : "partially_matched"
         await oppositeBet.save()
+
         // Update the new bet
         matchedAmount += amountToMatch
         remainingAmount -= amountToMatch
       }
     }
+
     // Update the new bet status
     newBet.matchedAmount = matchedAmount
     if (matchedAmount === 0) {
@@ -737,10 +783,12 @@ const matchBet = async (newBet, question) => {
     } else {
       newBet.status = "partially_matched"
     }
+
     // Calculate potential payout based on matched amount and odds
     // Get total amounts bet on Yes and No
     const totalYesBets = question.yesBetAmount || 0
     const totalNoBets = question.noBetAmount || 0
+
     // Calculate odds based on actual bet amounts
     let odds = 1.0 // Default to 1:1 odds
     if (newBet.choice === "Yes" && totalNoBets > 0) {
@@ -748,15 +796,19 @@ const matchBet = async (newBet, question) => {
     } else if (newBet.choice === "No" && totalYesBets > 0) {
       odds = totalYesBets / totalNoBets
     }
-    // Calculate potential payout with platform fee
+
+    // Calculate potential winnings with 5% platform fee
+    // Formula: payout = bet * 2 * 0.95
     const platformFeePercentageOnWinnings = 0.05
     const grossPotentialWinnings = matchedAmount * odds
     const potentialPayout = matchedAmount + grossPotentialWinnings * (1 - platformFeePercentageOnWinnings)
+
     console.log(`Potential payout calculation for matched bet:`)
     console.log(`- Matched amount: ${matchedAmount}`)
     console.log(`- Odds: ${odds}`)
     console.log(`- Gross potential winnings: ${grossPotentialWinnings}`)
     console.log(`- Potential payout: ${potentialPayout}`)
+
     newBet.potentialPayout = potentialPayout
     await newBet.save()
   } catch (error) {
@@ -766,7 +818,7 @@ const matchBet = async (newBet, question) => {
 }
 
 // Update global betting statistics - updated to track platform fees
-const updateBetStats = async (betAmount, platformFee) => {
+const updateBetStats = async (betAmount, platformFee, streamId) => {
   try {
     // Get current week's start and end dates
     const now = new Date()
@@ -776,11 +828,14 @@ const updateBetStats = async (betAmount, platformFee) => {
     const endOfWeek = new Date(startOfWeek)
     endOfWeek.setDate(startOfWeek.getDate() + 6)
     endOfWeek.setHours(23, 59, 59, 999)
-    // Find or create stats for current week
+
+    // Find or create stats for current week and specific streamId
     let stats = await BetStats.findOne({
       weekStartDate: { $lte: now },
       weekEndDate: { $gte: now },
+      streamId: streamId, // Filter by streamId
     })
+
     if (!stats) {
       stats = new BetStats({
         totalBetsAmount: 0,
@@ -790,8 +845,10 @@ const updateBetStats = async (betAmount, platformFee) => {
         activePlayers: 0,
         weekStartDate: startOfWeek,
         weekEndDate: endOfWeek,
+        streamId: streamId, // Ensure streamId is set here
       })
     }
+
     // Update stats
     stats.totalBetsAmount = (stats.totalBetsAmount || 0) + betAmount
     stats.totalPlatformFees = (stats.totalPlatformFees || 0) + platformFee
@@ -813,6 +870,7 @@ exports.resolveBetQuestion = async (req, res) => {
         message: "Invalid outcome. Must be Yes or No",
       })
     }
+
     // Find the question - handle both ObjectId and string ID formats
     let question = null
     // Try to find by ObjectId first if it's a valid ObjectId
@@ -829,26 +887,31 @@ exports.resolveBetQuestion = async (req, res) => {
         question: { $regex: questionId.replace("question-", "") },
       })
     }
+
     if (!question) {
       return res.status(404).json({
         success: false,
         message: "Question not found",
       })
     }
+
     if (question.resolved) {
       return res.status(400).json({
         success: false,
         message: "Question already resolved",
       })
     }
+
     // Update question
     question.resolved = true
     question.outcome = outcome
     question.active = false
     // question.correctChoice = outcome
     await question.save()
+
     // Process all bets for this question
     await processBetsForQuestion(question._id, outcome)
+
     // Emit socket event for question resolution
     if (io) {
       io.emit("questionResolved", {
@@ -856,6 +919,7 @@ exports.resolveBetQuestion = async (req, res) => {
         outcome,
       })
     }
+
     res.status(200).json({
       success: true,
       message: `Question resolved with outcome: ${outcome}`,
@@ -875,13 +939,24 @@ const processBetsForQuestion = async (questionId, outcome) => {
   try {
     console.log(`========== PROCESSING BETS FOR QUESTION ${questionId} ==========`)
     console.log(`Outcome: ${outcome}`)
+
+    // Get the question to retrieve its streamId
+    const question = await BetQuestion.findById(questionId)
+    if (!question) {
+      console.error(`Question ${questionId} not found for processing bets.`)
+      return
+    }
+    const streamId = question.streamId || "default-stream" // Get streamId from question
+
     // Get all bets for this question
     const bets = await Bet.find({ question: questionId, processed: false })
     console.log(`Processing ${bets.length} bets for question ${questionId} with outcome ${outcome}`)
+
     // First, check if there are both Yes and No bets
     const yesBets = bets.filter((bet) => bet.choice === "Yes")
     const noBets = bets.filter((bet) => bet.choice === "No")
     console.log(`Found ${yesBets.length} Yes bets and ${noBets.length} No bets`)
+
     // If there are only Yes bets or only No bets, refund all bets
     if (yesBets.length === 0 || noBets.length === 0) {
       console.log(`Only ${yesBets.length === 0 ? "No" : "Yes"} bets found. Refunding all bets.`)
@@ -891,9 +966,11 @@ const processBetsForQuestion = async (questionId, outcome) => {
           console.log(`User not found for bet ${bet._id}, skipping`)
           continue
         }
+
         // Refund the full original amount
         const refundAmount = bet.amount
         console.log(`Refunding ${refundAmount} to user ${user._id} for unmatched bet`)
+
         // Create refund transaction
         const refundTransaction = new Transaction({
           user: user._id,
@@ -905,6 +982,7 @@ const processBetsForQuestion = async (questionId, outcome) => {
           description: "Refund for unmatched bet (no opposing bets)",
         })
         await refundTransaction.save()
+
         // Update user balance with refund
         const previousBalance = user.walletBalance
         user.walletBalance += refundAmount
@@ -923,6 +1001,7 @@ const processBetsForQuestion = async (questionId, outcome) => {
         bet.status = "refunded"
         bet.processed = true
         await bet.save()
+
         // Emit wallet update event
         if (io) {
           io.emit("wallet_update", {
@@ -936,10 +1015,12 @@ const processBetsForQuestion = async (questionId, outcome) => {
       }
       return // Exit early as all bets have been refunded
     }
+
     // Calculate total amounts for Yes and No bets
     const totalYesAmount = yesBets.reduce((sum, bet) => sum + bet.amount, 0)
     const totalNoAmount = noBets.reduce((sum, bet) => sum + bet.amount, 0)
     console.log(`Total Yes amount: ${totalYesAmount}, Total No amount: ${totalNoAmount}`)
+
     // Process each bet
     for (const bet of bets) {
       // Skip already processed bets
@@ -947,16 +1028,20 @@ const processBetsForQuestion = async (questionId, outcome) => {
         console.log(`Bet ${bet._id} already processed, skipping`)
         continue
       }
+
       const user = await User.findById(bet.user)
       if (!user) {
         console.log(`User not found for bet ${bet._id}, skipping`)
         continue
       }
+
       // IMPORTANT: Log the bet choice and outcome for debugging
       console.log(`🎲 Processing bet ${bet._id}: User chose ${bet.choice}, outcome is ${outcome}`)
+
       // Determine if this bet is a winner
       const isWinner = String(bet.choice).toLowerCase() === String(outcome).toLowerCase()
       console.log(`🎲 Bet ${bet._id} is winner? ${isWinner}`)
+
       if (isWinner) {
         // Calculate the winning amount based on the proportion of this bet to total winning bets
         const winningBets = bet.choice === "Yes" ? yesBets : noBets
@@ -999,7 +1084,7 @@ const processBetsForQuestion = async (questionId, outcome) => {
         }
 
         // Update weekly stats if applicable
-        await updateBiggestWinThisWeek(profit)
+        await updateBiggestWinThisWeek(profit, streamId) // Pass streamId here
 
         // Create win transaction
         const winTransaction = new Transaction({
@@ -1028,10 +1113,8 @@ const processBetsForQuestion = async (questionId, outcome) => {
         // CRITICAL: Update user balance with winnings FIRST
         const previousBalance = user.walletBalance
         user.walletBalance += winAmount
-
         // Save user with updated balance
         await user.save()
-
         console.log(
           `💰 Updated user ${user._id} wallet balance from ${previousBalance} to ${user.walletBalance} after win of ${winAmount}`,
         )
@@ -1042,7 +1125,6 @@ const processBetsForQuestion = async (questionId, outcome) => {
         console.log(`🎯 Win amount to ADD to PlayFab: ${winAmount}`)
         console.log(`🎯 Bet ID: ${bet._id}`)
         console.log(`🎯 Source: bet_win`)
-
         // ENSURE we wait for PlayFab update to complete
         try {
           const playFabWinResult = await updatePlayFabInventory(
@@ -1051,7 +1133,6 @@ const processBetsForQuestion = async (questionId, outcome) => {
             bet._id.toString(),
             "bet_win",
           )
-
           if (playFabWinResult.success) {
             console.log(`✅ PlayFab win update successful for user ${user._id}`)
             console.log(`✅ PlayFab result:`, JSON.stringify(playFabWinResult.playFabResult, null, 2))
@@ -1063,7 +1144,6 @@ const processBetsForQuestion = async (questionId, outcome) => {
           console.error(`❌ PlayFab win update threw error for user ${user._id}:`, playFabError.message)
           // Log the error but don't fail the entire process
         }
-
         console.log(`🎯 === PLAYFAB UPDATE FOR BET WIN COMPLETED ===`)
 
         bet.status = "won"
@@ -1095,10 +1175,10 @@ const processBetsForQuestion = async (questionId, outcome) => {
         console.log(`💸 User: ${user._id}`)
         console.log(`💸 Bet ${bet._id} lost. PlayFab balance was already deducted during bet placement.`)
         console.log(`💸 No further PlayFab action needed for loss.`)
-
         bet.status = "lost"
         bet.potentialPayout = 0 // Ensure losers have zero potential payout
       }
+
       bet.processed = true
       await bet.save()
     }
@@ -1109,14 +1189,17 @@ const processBetsForQuestion = async (questionId, outcome) => {
 }
 
 // Update biggest win this week in stats
-const updateBiggestWinThisWeek = async (winAmount) => {
+const updateBiggestWinThisWeek = async (winAmount, streamId) => {
   try {
     const now = new Date()
-    // Find or create stats for the current week
+
+    // Find or create stats for the current week and specific streamId
     let stats = await BetStats.findOne({
       weekStartDate: { $lte: now },
       weekEndDate: { $gte: now },
+      streamId: streamId, // Filter by streamId
     })
+
     if (!stats) {
       // Calculate week start and end dates
       const startOfWeek = new Date(now)
@@ -1125,6 +1208,7 @@ const updateBiggestWinThisWeek = async (winAmount) => {
       const endOfWeek = new Date(startOfWeek)
       endOfWeek.setDate(startOfWeek.getDate() + 6)
       endOfWeek.setHours(23, 59, 59, 999)
+
       stats = new BetStats({
         totalBetsAmount: 0,
         totalPlatformFees: 0,
@@ -1133,15 +1217,17 @@ const updateBiggestWinThisWeek = async (winAmount) => {
         activePlayers: 0,
         weekStartDate: startOfWeek,
         weekEndDate: endOfWeek,
-        streamId: "default-stream",
+        streamId: streamId, // Ensure streamId is set here
       })
     }
+
     // Update biggest win if the new win is larger
     if (winAmount > (stats.biggestWinThisWeek || 0)) {
       console.log(`New biggest win this week: ${winAmount} (previous: ${stats.biggestWinThisWeek || 0})`)
       stats.biggestWinThisWeek = winAmount
       console.log(`New biggest win this week: ${winAmount} (previous: ${stats.biggestWinThisWeek || 0})`)
       await stats.save()
+
       // Broadcast the new biggest win to all clients
       if (io) {
         io.emit("biggest_win_update", {
@@ -1163,6 +1249,7 @@ exports.getUserBets = async (req, res) => {
       .populate("question", "question outcome resolved")
       .sort({ createdAt: -1 })
       .limit(20)
+
     res.status(200).json({
       success: true,
       bets,
@@ -1182,6 +1269,7 @@ exports.getActiveBetQuestion = async (req, res) => {
   try {
     // Get the current camera holder from the socket manager
     const cameraHolder = socketManager.getCurrentCameraHolder()
+
     // Only return a question if there's a valid camera holder
     if (!cameraHolder || !cameraHolder.CameraHolderName || cameraHolder.CameraHolderName === "None") {
       return res.status(404).json({
@@ -1189,11 +1277,13 @@ exports.getActiveBetQuestion = async (req, res) => {
         message: "No active camera holder available for betting",
       })
     }
+
     const activeQuestion = await BetQuestion.findOne({
       active: true,
       resolved: false,
       endTime: { $gt: new Date() },
     })
+
     if (!activeQuestion) {
       // If no active question is found but we have a camera holder, create a new one using socket-manager
       const streamId = req.query.streamId || "default-stream"
@@ -1210,12 +1300,14 @@ exports.getActiveBetQuestion = async (req, res) => {
         question: newQuestion,
       })
     }
+
     // Update the response to include the current camera holder
     const questionResponse = {
       ...activeQuestion.toObject(),
       subject: cameraHolder.CameraHolderName,
       question: activeQuestion.question,
     }
+
     res.status(200).json({
       success: true,
       question: questionResponse,
@@ -1234,11 +1326,15 @@ exports.getActiveBetQuestion = async (req, res) => {
 exports.getBetStats = async (req, res) => {
   try {
     const now = new Date()
-    // Try to find stats for current week
+    const streamId = req.query.streamId || "default-stream" // Get streamId from query
+
+    // Try to find stats for current week and specific streamId
     let stats = await BetStats.findOne({
       weekStartDate: { $lte: now },
       weekEndDate: { $gte: now },
+      streamId: streamId, // Filter by streamId
     })
+
     // If no stats found, create default stats with zero values
     if (!stats) {
       // Calculate week start and end dates
@@ -1248,6 +1344,7 @@ exports.getBetStats = async (req, res) => {
       const endOfWeek = new Date(startOfWeek)
       endOfWeek.setDate(startOfWeek.getDate() + 6)
       endOfWeek.setHours(23, 59, 59, 999)
+
       stats = new BetStats({
         totalBetsAmount: 0, // Zero instead of sample data
         totalPlatformFees: 0,
@@ -1256,31 +1353,41 @@ exports.getBetStats = async (req, res) => {
         activePlayers: 0, // Zero instead of sample data
         weekStartDate: startOfWeek,
         weekEndDate: endOfWeek,
-        streamId: req.query.streamId || "default-stream",
+        streamId: streamId, // Ensure streamId is set here
       })
       await stats.save()
     }
+
     // Get active players count (users who placed bets in the last 24 hours)
     const activePlayers = await Bet.distinct("user", {
       createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, // Last 24 hours
+      streamId: streamId, // Filter by streamId
     })
     const activePlayersCount = activePlayers.length
     stats.activePlayers = activePlayersCount
+
     // Get total unique players
-    const totalPlayers = await Bet.distinct("user")
+    const totalPlayers = await Bet.distinct("user", { streamId: streamId }) // Filter by streamId
     stats.totalPlayers = totalPlayers.length
+
     // Get total bets amount (sum of all bet amounts)
-    const totalBetsAggregate = await Bet.aggregate([{ $group: { _id: null, total: { $sum: "$amount" } } }])
+    const totalBetsAggregate = await Bet.aggregate([
+      { $match: { streamId: streamId } }, // Filter by streamId
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ])
     const totalBetsAmount = totalBetsAggregate.length > 0 ? totalBetsAggregate[0].total : 0
     stats.totalBetsAmount = totalBetsAmount
+
     // Get total platform fees (sum of all platform fees)
     const totalFeesAggregate = await Transaction.aggregate([
-      { $match: { type: "platform_fee" } },
+      { $match: { type: "platform_fee", streamId: streamId } }, // Filter by streamId
       { $group: { _id: null, total: { $sum: { $abs: "$amount" } } } },
     ])
     const totalPlatformFees = totalFeesAggregate.length > 0 ? totalFeesAggregate[0].total : 0
     stats.totalPlatformFees = totalPlatformFees
+
     await stats.save()
+
     // Emit updated stats via socket if available
     if (io) {
       console.log("Emitting betting stats with biggestWinThisWeek:", stats.biggestWinThisWeek)
@@ -1292,6 +1399,7 @@ exports.getBetStats = async (req, res) => {
         activePlayers: stats.activePlayers,
       })
     }
+
     console.log("Sending betting stats with biggestWinThisWeek:", stats.biggestWinThisWeek)
     res.status(200).json({
       success: true,
@@ -1338,12 +1446,15 @@ exports.loginHook = async (req, res, next) => {
 // Get platform fee statistics
 exports.getPlatformFeeStats = async (req, res) => {
   try {
+    const streamId = req.query.streamId || "default-stream" // Get streamId from query
+
     // Get total platform fees collected
     const totalFeesAggregate = await Transaction.aggregate([
-      { $match: { type: "platform_fee" } },
+      { $match: { type: "platform_fee", streamId: streamId } }, // Filter by streamId
       { $group: { _id: null, total: { $sum: "$amount" } } },
     ])
     const totalFees = totalFeesAggregate.length > 0 ? Math.abs(totalFeesAggregate[0].total) : 0
+
     // Get platform fees by day for the last 7 days
     const sevenDaysAgo = new Date()
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
@@ -1352,6 +1463,7 @@ exports.getPlatformFeeStats = async (req, res) => {
         $match: {
           type: "platform_fee",
           createdAt: { $gte: sevenDaysAgo },
+          streamId: streamId, // Filter by streamId
         },
       },
       {
@@ -1364,6 +1476,7 @@ exports.getPlatformFeeStats = async (req, res) => {
       },
       { $sort: { _id: 1 } },
     ])
+
     res.status(200).json({
       success: true,
       stats: {
@@ -1387,6 +1500,7 @@ exports.handleCameraHolderChange = async (req, res) => {
   try {
     const { previousHolder, newHolder } = req.body
     console.log(`Camera holder changed from ${previousHolder} to ${newHolder}`)
+
     // If the camera holder changed to None or empty, resolve all active questions with "No" outcome
     if (!newHolder || newHolder === "None") {
       // Find all active questions
@@ -1394,6 +1508,7 @@ exports.handleCameraHolderChange = async (req, res) => {
         active: true,
         resolved: false,
       })
+
       // Resolve each question
       for (const question of activeQuestions) {
         question.resolved = true
@@ -1401,8 +1516,10 @@ exports.handleCameraHolderChange = async (req, res) => {
         question.active = false
         question.resolvedReason = "Camera holder died or changed"
         await question.save()
+
         // Process all bets for this question
         await processBetsForQuestion(question._id, "No")
+
         // Emit socket event for question resolution
         if (io) {
           io.emit("questionResolved", {
@@ -1413,12 +1530,14 @@ exports.handleCameraHolderChange = async (req, res) => {
         }
       }
     }
+
     // Update the camera holder in the socket manager if available
     if (socketManager && typeof socketManager.updateCameraHolder === "function") {
       socketManager.updateCameraHolder({
         CameraHolderName: newHolder || "None",
       })
     }
+
     res.status(200).json({
       success: true,
       message: "Camera holder change processed successfully",
@@ -1439,6 +1558,7 @@ exports.handleCameraHolderChange = async (req, res) => {
 exports.createBetQuestion = async (req, res) => {
   try {
     const { streamId } = req.body || { streamId: "default-stream" }
+
     // Use the generateNewQuestion function from socket-manager
     const newQuestion = await socketManager.generateNewQuestion(streamId)
     if (!newQuestion) {
@@ -1447,6 +1567,7 @@ exports.createBetQuestion = async (req, res) => {
         message: "Could not generate a new question. No active camera holder available.",
       })
     }
+
     res.status(201).json({
       success: true,
       question: newQuestion,
@@ -1465,6 +1586,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
   try {
     console.log("=== PLACE BET WITH PARTIAL PAYMENT START ===")
     const { questionId, choice, amount, streamId, paymentAmount } = req.body
+
     // Add more robust user ID extraction with fallbacks
     let userId
     if (req.user) {
@@ -1477,6 +1599,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         message: "User ID not found in request",
       })
     }
+
     console.log("Received bet request:", {
       questionId,
       choice,
@@ -1485,6 +1608,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       userId,
       paymentAmount,
     })
+
     // Validate bet amount
     if (!amount || amount <= 0) {
       return res.status(400).json({
@@ -1492,6 +1616,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         message: "Invalid bet amount",
       })
     }
+
     // Validate payment amount
     if (!paymentAmount || paymentAmount <= 0) {
       return res.status(400).json({
@@ -1499,6 +1624,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         message: "Invalid payment amount",
       })
     }
+
     // Validate streamId
     if (!streamId) {
       return res.status(400).json({
@@ -1506,6 +1632,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         message: "Stream ID is required",
       })
     }
+
     // Find user with actual balance
     console.log("Finding user with ID:", userId)
     const user = await User.findById(userId)
@@ -1518,14 +1645,17 @@ exports.placeBetWithPartialPayment = async (req, res) => {
     }
     console.log("Found user:", user.username || user.email || userId)
     console.log("Current wallet balance:", user.walletBalance || 0)
+
     // Calculate how much should be deducted from wallet vs. payment
     const walletBalance = user.walletBalance || 0
     const totalBetAmount = Number(amount)
+
     // Calculate how much to take from wallet and how much from payment
     const walletDeduction = Math.min(walletBalance, totalBetAmount)
     const paymentNeeded = totalBetAmount - walletDeduction
     console.log(`Wallet balance: ${walletBalance}, Total bet: ${totalBetAmount}`)
     console.log(`Will deduct ${walletDeduction} from wallet and ${paymentNeeded} from payment`)
+
     // Verify the payment amount is sufficient
     if (paymentAmount < paymentNeeded) {
       console.log(`Insufficient payment amount. Needed: ${paymentNeeded}, Provided: ${paymentAmount}`)
@@ -1538,6 +1668,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         paymentProvided: paymentAmount,
       })
     }
+
     // Find the question - handle both ObjectId and string ID formats
     let question = null
     try {
@@ -1612,6 +1743,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         error: error.message,
       })
     }
+
     if (!question) {
       // Create a debug endpoint to check what questions exist
       const allQuestions = await BetQuestion.find().sort({ createdAt: -1 }).limit(5)
@@ -1628,6 +1760,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         message: "Bet question not found. Please refresh and try again.",
       })
     }
+
     // Check if question is still active
     if (!question.active || question.resolved) {
       return res.status(400).json({
@@ -1635,6 +1768,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         message: "This betting round has ended",
       })
     }
+
     // Check if countdown has expired
     if (new Date() > question.endTime) {
       return res.status(400).json({
@@ -1642,12 +1776,14 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         message: "Betting time has expired for this question",
       })
     }
+
     // Calculate platform fee (5% of bet amount)
     const platformFeePercentage = 0.05
     const platformFee = Math.round(amount * platformFeePercentage)
     const betAmountAfterFee = amount - platformFee
     console.log(`Calculating platform fee: ${platformFee} (${platformFeePercentage * 100}% of ${amount})`)
     console.log(`Bet amount after fee: ${betAmountAfterFee}`)
+
     // Create the bet with the amount after fee
     console.log("Creating new bet")
     const bet = new Bet({
@@ -1664,8 +1800,10 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       potentialPayout: 0,
       processed: false,
     })
+
     // Store the previous balance for response
     const previousBalance = user.walletBalance || 0
+
     // Update user's wallet balance - only deduct the wallet portion
     console.log("Updating user wallet balance from", previousBalance, "to", previousBalance - walletDeduction)
     user.walletBalance = previousBalance - walletDeduction
@@ -1691,6 +1829,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       balanceAfter: user.walletBalance + platformFee, // Temporary balance after just the bet
     })
     await betTransaction.save()
+
     // Create transaction record for the platform fee
     console.log("Creating platform fee transaction record")
     const feeTransaction = new Transaction({
@@ -1702,6 +1841,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       balanceAfter: user.walletBalance, // Final balance after both bet and fee
     })
     await feeTransaction.save()
+
     // Create transaction record for the payment portion
     if (paymentNeeded > 0) {
       console.log("Creating payment transaction record")
@@ -1715,6 +1855,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       })
       await paymentTransaction.save()
     }
+
     // Update question stats with the bet amount after fee
     console.log("Updating question stats")
     if (choice === "Yes") {
@@ -1745,6 +1886,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       }
     }
     question.totalBetAmount = (question.totalBetAmount || 0) + betAmountAfterFee
+
     // Check if this user has already bet on this question (regardless of choice)
     const existingBet = await Bet.findOne({
       user: userId,
@@ -1756,6 +1898,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       question.totalPlayers = (question.totalPlayers || 0) + 1
     }
     question.totalPlatformFees = (question.totalPlatformFees || 0) + platformFee
+
     // Recalculate percentages based on user counts instead of bet amounts
     const totalUsers = (question.yesUserCount || 0) + (question.noUserCount || 0)
     if (totalUsers > 0) {
@@ -1776,6 +1919,7 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       question.noPercentage = 50
     }
     await question.save()
+
     // Calculate potential payout based on current odds
     console.log("Calculating potential payout")
     const odds =
@@ -1786,16 +1930,19 @@ exports.placeBetWithPartialPayment = async (req, res) => {
     const grossPotentialWinnings = betAmountAfterFee * odds
     const platformFeeOnWinnings = (betAmountAfterFee + grossPotentialWinnings) * platformFeePercentageOnWinnings
     const potentialPayout = betAmountAfterFee + grossPotentialWinnings - platformFeeOnWinnings
+
     console.log(`Potential payout calculation:`)
     console.log(`- Bet amount after initial fee: ${betAmountAfterFee}`)
     console.log(`- Odds: ${odds}`)
     console.log(`- Gross potential winnings: ${grossPotentialWinnings}`)
     console.log(`- Platform fee (${platformFeePercentageOnWinnings * 100}%): ${platformFeeOnWinnings}`)
     console.log(`- Net potential payout: ${potentialPayout}`)
+
     bet.potentialPayout = potentialPayout
     bet.grossPotentialPayout = betAmountAfterFee + grossPotentialWinnings
     bet.platformFeeOnWinnings = platformFeeOnWinnings
     await bet.save()
+
     // Try to match the bet
     console.log("Matching bet")
     try {
@@ -1804,14 +1951,16 @@ exports.placeBetWithPartialPayment = async (req, res) => {
       console.error("Error matching bet:", matchError)
       // Continue even if matching fails
     }
+
     // Update global stats
     console.log("Updating global stats")
     try {
-      await updateBetStats(betAmountAfterFee, platformFee)
+      await updateBetStats(betAmountAfterFee, platformFee, streamId) // Pass streamId here
     } catch (statsError) {
       console.error("Error updating stats:", statsError)
       // Continue even if stats update fails
     }
+
     // Emit socket events for real-time updates
     console.log("Emitting socket events")
     if (io) {
@@ -1859,11 +2008,13 @@ exports.placeBetWithPartialPayment = async (req, res) => {
         paymentAmount: paymentNeeded, // Include the payment amount
       })
     }
+
     console.log("Bet placed successfully")
     console.log("New balance:", user.walletBalance)
     console.log("Previous balance:", previousBalance)
     console.log("Wallet deduction:", walletDeduction)
     console.log("Payment amount:", paymentNeeded)
+
     res.status(201).json({
       success: true,
       bet: {
@@ -1916,7 +2067,6 @@ exports.placeBetWithPartialPayment = async (req, res) => {
 exports.debugController = async (req, res) => {
   try {
     console.log("=== DEBUG CONTROLLER CALLED ===")
-
     // Get some basic stats
     const totalBets = await Bet.countDocuments()
     const totalUsers = await User.countDocuments()
