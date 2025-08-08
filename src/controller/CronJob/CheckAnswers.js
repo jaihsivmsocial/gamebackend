@@ -4,7 +4,6 @@ const BetQuestion = require("../../model/battingModel/BetQuestion")
 const Bet = require("../../model/battingModel/Bet")
 const User = require("../../model/authModel/userModel.js")
 const Transaction = require("../../model/battingModel/Transaction")
-const BetStats = require("../../model/battingModel/BetStats")
 
 // 🔥 CRITICAL FIX: Import PlayFab service for inventory updates
 const playFabService = require("../../utils/playfab/playfab-service.js")
@@ -369,7 +368,6 @@ async function refundBet(bet) {
       balanceAfter: user.walletBalance + refundAmount,
       description: "Refund for unmatched bet (no opposing bets)",
     })
-
     try {
       // Use a transaction to ensure atomic updates
       const session = await mongoose.startSession()
@@ -527,57 +525,6 @@ async function refundPartialBet(bet, unmatchedAmount) {
     }
   } catch (error) {
     console.error(`Error processing partial refund for bet ${bet._id}:`, error)
-  }
-}
-
-// Update biggest win this week in stats
-async function updateBiggestWinThisWeek(winAmount) {
-  try {
-    const now = new Date()
-
-    // Find or create stats for the current week
-    let stats = await BetStats.findOne({
-      weekStartDate: { $lte: now },
-      weekEndDate: { $gte: now },
-    })
-
-    if (!stats) {
-      // Calculate week start and end dates
-      const startOfWeek = new Date(now)
-      startOfWeek.setDate(now.getDate() - now.getDay())
-      startOfWeek.setHours(0, 0, 0, 0)
-
-      const endOfWeek = new Date(startOfWeek)
-      endOfWeek.setDate(startOfWeek.getDate() + 6)
-      endOfWeek.setHours(23, 59, 59, 999)
-
-      stats = new BetStats({
-        totalBetsAmount: 0,
-        totalPlatformFees: 0,
-        biggestWinThisWeek: 0,
-        totalPlayers: 0,
-        activePlayers: 0,
-        weekStartDate: startOfWeek,
-        weekEndDate: endOfWeek,
-        streamId: "default-stream",
-      })
-    }
-
-    // Update biggest win if the new win is larger
-    if (winAmount > (stats.biggestWinThisWeek || 0)) {
-      console.log(`New biggest win this week: ${winAmount} (previous: ${stats.biggestWinThisWeek || 0})`)
-      stats.biggestWinThisWeek = winAmount
-      await stats.save()
-
-      // Broadcast the new biggest win to all clients
-      if (io) {
-        io.emit("biggest_win_update", {
-          biggestWinThisWeek: winAmount,
-        })
-      }
-    }
-  } catch (error) {
-    console.error("Update biggest win error:", error)
   }
 }
 
