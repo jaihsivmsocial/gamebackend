@@ -10,7 +10,7 @@ const {
   resetBalance,
   getPlatformFeeStats,
   // debugController,
-  loginHook,
+
   placeBetWithPartialPayment,
 } = require("../../controller/BetController/bet-controller.js")
 const authenticate = require("../../middleware/authMiddleware.js")
@@ -18,8 +18,6 @@ const authenticate = require("../../middleware/authMiddleware.js")
 
 const router = express.Router()
 
-// Apply login hook to all routes
-router.use(loginHook)
 
 // Place a bet (protected route)
 router.post("/place", authenticate, placeBet)
@@ -48,6 +46,6 @@ router.post("/wallet/update", authenticate, updateWalletBalance)
 // Reset user wallet balance (protected route)
 router.post("/wallet/reset", authenticate, resetBalance)
 
-router.post("/place-partial", authenticate, placeBetWithPartialPayment)
+// router.post("/place-partial", authenticate, placeBetWithPartialPayment)
 
 module.exports = router

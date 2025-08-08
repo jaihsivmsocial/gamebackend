@@ -6,8 +6,10 @@ const Transaction = require("../../model/battingModel/Transaction.js")
 const BetStats = require("../../model/battingModel/BetStats.js")
 const mongoose = require("mongoose")
 
+// IMPORTANT: This service handles all communication with PlayFab.
 // Ensure this path points to your working 'playfab-service-production.js' file.
 const playFabService = require("../../utils/playfab/playfab-service.js")
+
 let io
 let socketManager
 try {
@@ -24,6 +26,22 @@ try {
     getCurrentCameraHolder: () => null,
   }
 }
+
+// Find the ensureFixedBalance function and replace it with this dynamic balance function
+const ensureUserBalance = async (userId) => {
+  try {
+    const user = await User.findById(userId)
+    if (user) {
+      // No longer setting a fixed balance - using the actual user balance
+      return user
+    }
+    return null
+  } catch (error) {
+    console.error("Error ensuring user balance:", error)
+    return null
+  }
+}
+
 /**
  * Helper function to update PlayFab inventory for all betting operations.
  * This function centralizes calls to the PlayFab service.
@@ -650,6 +668,7 @@ exports.resetBalance = async (req, res) => {
     })
   }
 }
+
 // Add a new API endpoint to update wallet balance
 exports.updateWalletBalance = async (req, res) => {
   try {
@@ -1169,6 +1188,59 @@ const processBetsForQuestion = async (questionId, outcome) => {
   }
 }
 
+// Update biggest win this week in stats
+const updateBiggestWinThisWeek = async (winAmount, streamId) => {
+  try {
+    const now = new Date()
+
+    // Find or create stats for the current week and specific streamId
+    let stats = await BetStats.findOne({
+      weekStartDate: { $lte: now },
+      weekEndDate: { $gte: now },
+      streamId: streamId, // Filter by streamId
+    })
+
+    if (!stats) {
+      // Calculate week start and end dates
+      const startOfWeek = new Date(now)
+      startOfWeek.setDate(now.getDate() - now.getDay())
+      startOfWeek.setHours(0, 0, 0, 0)
+      const endOfWeek = new Date(startOfWeek)
+      endOfWeek.setDate(startOfWeek.getDate() + 6)
+      endOfWeek.setHours(23, 59, 59, 999)
+
+      stats = new BetStats({
+        totalBetsAmount: 0,
+        totalPlatformFees: 0,
+        biggestWinThisWeek: 0,
+        totalPlayers: 0,
+        activePlayers: 0,
+        weekStartDate: startOfWeek,
+        weekEndDate: endOfWeek,
+        streamId: streamId, // Ensure streamId is set here
+      })
+    }
+
+    // Update biggest win if the new win is larger
+    if (winAmount > (stats.biggestWinThisWeek || 0)) {
+      console.log(`New biggest win this week: ${winAmount} (previous: ${stats.biggestWinThisWeek || 0})`)
+      stats.biggestWinThisWeek = winAmount
+      console.log(`New biggest win this week: ${winAmount} (previous: ${stats.biggestWinThisWeek || 0})`)
+      await stats.save()
+
+      // Broadcast the new biggest win to all clients
+      if (io) {
+        io.emit("biggest_win_update", {
+          biggestWinThisWeek: winAmount,
+        })
+      }
+    }
+  } catch (error) {
+    console.error("Update biggest win error:", error)
+    throw error
+  }
+}
+
 // Get user's bet history
 exports.getUserBets = async (req, res) => {
   try {
@@ -1352,6 +1424,22 @@ exports.getBetStats = async (req, res) => {
         activePlayers: 0,
       },
     })
+  }
+}
+
+// Login hook to ensure user has 5000 balance
+exports.loginHook = async (req, res, next) => {
+  try {
+    if (req.user && req.user.id) {
+      const user = await ensureUserBalance(req.user.id)
+      if (!user) {
+        console.error("User not found during login hook")
+      }
+    }
+    next()
+  } catch (error) {
+    console.error("Login hook error:", error)
+    next()
   }
 }
 
@@ -1974,6 +2062,5 @@ exports.placeBetWithPartialPayment = async (req, res) => {
     })
   }
 }
-
 
 module.exports = exports

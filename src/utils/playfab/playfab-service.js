@@ -42,15 +42,12 @@ class PlayFabService {
           },
         },
       )
-
       if (response.data && response.data.code === 200) {
         const entityToken = response.data.data.EntityToken
         const entityId = response.data.data.Entity.Id
         const entityType = response.data.data.Entity.Type
-
         console.log(`✅ Generated Title EntityToken successfully`)
         console.log(`Entity ID: ${entityId}, Type: ${entityType}`)
-
         // Cache the token with expiration
         const expirationTime = Date.now() + 23 * 60 * 60 * 1000 // 23 hours (tokens last 24 hours)
         this.entityTokenCache.set("server", {
@@ -59,18 +56,14 @@ class PlayFabService {
           entityType: entityType,
           expiresAt: expirationTime,
         })
-
         return entityToken
       }
-
       throw new Error("Failed to generate Title EntityToken")
     } catch (error) {
       console.error("❌ Title EntityToken generation failed:", error.response?.data || error.message)
-
       // Try alternative method if the first one fails
       try {
         console.log("🔄 Trying alternative EntityToken generation method...")
-
         const altResponse = await axios.post(
           `${this.baseUrl}/Authentication/GetEntityToken`,
           {}, // Empty body for server authentication
@@ -81,15 +74,12 @@ class PlayFabService {
             },
           },
         )
-
         if (altResponse.data && altResponse.data.code === 200) {
           const entityToken = altResponse.data.data.EntityToken
           const entityId = altResponse.data.data.Entity.Id
           const entityType = altResponse.data.data.Entity.Type
-
           console.log(`✅ Generated EntityToken with alternative method`)
           console.log(`Entity ID: ${entityId}, Type: ${entityType}`)
-
           // Cache the token
           const expirationTime = Date.now() + 23 * 60 * 60 * 1000
           this.entityTokenCache.set("server", {
@@ -98,13 +88,11 @@ class PlayFabService {
             entityType: entityType,
             expiresAt: expirationTime,
           })
-
           return entityToken
         }
       } catch (altError) {
         console.error("❌ Alternative EntityToken generation also failed:", altError.response?.data || altError.message)
       }
-
       throw new Error(`EntityToken generation failed: ${error.response?.data?.errorMessage || error.message}`)
     }
   }
@@ -120,7 +108,6 @@ class PlayFabService {
       if (cached && cached.expiresAt > Date.now()) {
         return cached.token
       }
-
       // Generate new token if cache is empty or expired
       return await this.generateServerEntityToken()
     } catch (error) {
@@ -162,18 +149,14 @@ class PlayFabService {
       console.log(`Amount to ADD: ${amount}`)
       console.log(`Item ID: ${this.virtualCurrencyItemId}`)
       console.log(`Reason: ${reason}`)
-
       const entityId = this.getPlayFabEntityId(user)
       if (!entityId) {
         throw new Error("Missing PlayFab Entity ID for user")
       }
-
       console.log(`✅ Found PlayFab Entity ID: ${entityId}`)
-
       // Get fresh EntityToken (same as your Postman request)
       const entityToken = await this.getValidEntityToken()
       console.log(`🔑 Using EntityToken: ${entityToken.substring(0, 20)}...`)
-
       // Use EXACT same format as your working Postman request
       const requestPayload = {
         Entity: {
@@ -185,10 +168,8 @@ class PlayFabService {
         },
         Amount: Math.abs(Number.parseInt(amount)), // Ensure positive number for addition
       }
-
       console.log("📤 InventoryV2 AddInventoryItems request:")
       console.log(JSON.stringify(requestPayload, null, 2))
-
       // Make the exact same request as your Postman
       const response = await axios.post(`${this.baseUrl}/Inventory/AddInventoryItems`, requestPayload, {
         headers: {
@@ -196,15 +177,12 @@ class PlayFabService {
           "X-EntityToken": entityToken, // Same header as your Postman
         },
       })
-
       console.log("📥 InventoryV2 AddInventoryItems response:")
       console.log(JSON.stringify(response.data, null, 2))
-
       if (response.data && response.data.code === 200) {
         console.log("✅ Successfully added $VIRT to InventoryV2 (Production)!")
         console.log(`✅ Added amount: ${requestPayload.Amount}`)
         console.log(`✅ Transaction IDs: ${JSON.stringify(response.data.data.TransactionIds)}`)
-
         return {
           success: true,
           data: response.data.data,
@@ -216,12 +194,10 @@ class PlayFabService {
           idempotencyId: response.data.data.IdempotencyId,
         }
       }
-
       throw new Error(`InventoryV2 API returned code: ${response.data?.code || "unknown"}`)
     } catch (error) {
       console.error("❌ Error adding $VIRT to InventoryV2 (Production):")
       console.error("Error details:", error.response?.data || error.message)
-
       // Check for permission error and provide fallback
       if (error.response?.data?.errorCode === 1191) {
         const permissionError = new Error("InventoryV2 permissions not enabled")
@@ -229,7 +205,6 @@ class PlayFabService {
         permissionError.isPermissionError = true
         throw permissionError
       }
-
       throw new Error(`Failed to add $VIRT to InventoryV2: ${error.message}`)
     }
   }
@@ -248,15 +223,12 @@ class PlayFabService {
       console.log(`Amount: ${amount}`)
       console.log(`Item ID: ${this.virtualCurrencyItemId}`)
       console.log(`Reason: ${reason}`)
-
       const entityId = this.getPlayFabEntityId(user)
       if (!entityId) {
         throw new Error("Missing PlayFab Entity ID for user")
       }
-
       // Get fresh EntityToken
       const entityToken = await this.getValidEntityToken()
-
       // Use SubtractInventoryItems for deductions
       const requestPayload = {
         Entity: {
@@ -268,21 +240,17 @@ class PlayFabService {
         },
         Amount: Math.abs(amount), // Ensure positive number for subtraction
       }
-
       console.log("📤 InventoryV2 SubtractInventoryItems request:")
       console.log(JSON.stringify(requestPayload, null, 2))
       console.log(`🔑 Using EntityToken: ${entityToken.substring(0, 20)}...`)
-
       const response = await axios.post(`${this.baseUrl}/Inventory/SubtractInventoryItems`, requestPayload, {
         headers: {
           "Content-Type": "application/json",
           "X-EntityToken": entityToken,
         },
       })
-
       console.log("📥 InventoryV2 SubtractInventoryItems response:")
       console.log(JSON.stringify(response.data, null, 2))
-
       if (response.data && response.data.code === 200) {
         console.log("✅ Successfully removed $VIRT from InventoryV2 (Production)!")
         return {
@@ -296,12 +264,10 @@ class PlayFabService {
           idempotencyId: response.data.data.IdempotencyId,
         }
       }
-
       throw new Error(`InventoryV2 SubtractInventoryItems returned code: ${response.data?.code || "unknown"}`)
     } catch (error) {
       console.error("❌ Error removing $VIRT from InventoryV2 (Production):")
       console.error("Error details:", error.response?.data || error.message)
-
       // Check for permission error and provide fallback
       if (error.response?.data?.errorCode === 1191) {
         const permissionError = new Error("InventoryV2 permissions not enabled")
@@ -309,13 +275,14 @@ class PlayFabService {
         permissionError.isPermissionError = true
         throw permissionError
       }
-
       throw new Error(`Failed to remove $VIRT from InventoryV2: ${error.message}`)
     }
   }
 
   /**
    * Get player's virtual currency balance from InventoryV2
+   * NOTE: This function is likely being called too frequently by an external process,
+   * leading to the high number of GetInventoryItems API calls.
    * @param {Object} user - User object from database
    * @returns {Promise<Object>} Player's inventory data
    */
@@ -325,13 +292,10 @@ class PlayFabService {
       if (!entityId) {
         throw new Error("No PlayFab Entity ID found")
       }
-
       // Get fresh EntityToken using server secret key
       const entityToken = await this.getValidEntityToken()
-
       // console.log(`📋 Getting InventoryV2 data for entity ${entityId}`)
       // console.log(`🔑 Using EntityToken: ${entityToken.substring(0, 20)}...`)
-
       const response = await axios.post(
         `${this.baseUrl}/Inventory/GetInventoryItems`,
         {
@@ -347,14 +311,11 @@ class PlayFabService {
           },
         },
       )
-
       if (response.data && response.data.code === 200) {
         const inventoryItems = response.data.data.Items || []
         const virtCurrencyItem = inventoryItems.find((item) => item.Id === this.virtualCurrencyItemId)
-
         console.log(`Found ${inventoryItems.length} inventory items`)
         // console.log("$VIRT currency item:", virtCurrencyItem)
-
         return {
           success: true,
           virtualCurrencyBalance: virtCurrencyItem ? virtCurrencyItem.Amount : 0,
@@ -363,7 +324,6 @@ class PlayFabService {
           etag: response.data.data.ETag,
         }
       }
-
       throw new Error("InventoryV2 API returned unsuccessful response")
     } catch (error) {
       if (error.response?.data?.errorCode === 1191) {
@@ -372,7 +332,6 @@ class PlayFabService {
         permissionError.isPermissionError = true
         throw permissionError
       }
-
       throw new Error(`Failed to get player inventory: ${error.message}`)
     }
   }
@@ -390,37 +349,30 @@ class PlayFabService {
       if (!playFabId) {
         throw new Error("Missing PlayFab ID")
       }
-
       console.log(`💰 === ADDING VIRTUAL CURRENCY (LEGACY API) ===`)
       console.log(`User ID: ${user._id}`)
       console.log(`PlayFab ID: ${playFabId}`)
       console.log(`Amount to ADD: ${amount}`)
       console.log(`Reason: ${reason}`)
-
       const requestPayload = {
         PlayFabId: playFabId,
         VirtualCurrency: "RT",
         Amount: Math.abs(Number.parseInt(amount)), // Ensure positive number for addition
       }
-
       console.log("📤 Legacy API AddUserVirtualCurrency request:")
       console.log(JSON.stringify(requestPayload, null, 2))
-
       const response = await axios.post(`${this.baseUrl}/Server/AddUserVirtualCurrency`, requestPayload, {
         headers: {
           "Content-Type": "application/json",
           "X-SecretKey": this.secretKey,
         },
       })
-
       console.log("📥 Legacy API AddUserVirtualCurrency response:")
       console.log(JSON.stringify(response.data, null, 2))
-
       if (response.data && response.data.code === 200) {
         console.log("✅ Successfully added RT using Legacy API!")
         console.log(`✅ New balance: ${response.data.data.Balance}`)
         console.log(`✅ Balance change: ${response.data.data.BalanceChange}`)
-
         return {
           success: true,
           data: response.data.data,
@@ -431,7 +383,6 @@ class PlayFabService {
           balanceChange: response.data.data.BalanceChange,
         }
       }
-
       throw new Error(`Legacy API returned code: ${response.data?.code || "unknown"}`)
     } catch (error) {
       console.error("❌ Error adding virtual currency (Legacy):", error.response?.data || error.message)
@@ -452,22 +403,18 @@ class PlayFabService {
       if (!playFabId) {
         throw new Error("Missing PlayFab ID")
       }
-
       console.log(`💸 Subtracting ${amount} RT using Legacy API for PlayFab ID: ${playFabId}`)
-
       const requestPayload = {
         PlayFabId: playFabId,
         VirtualCurrency: "RT",
         Amount: -Math.abs(amount), // Negative amount for subtraction
       }
-
       const response = await axios.post(`${this.baseUrl}/Server/AddUserVirtualCurrency`, requestPayload, {
         headers: {
           "Content-Type": "application/json",
           "X-SecretKey": this.secretKey,
         },
       })
-
       if (response.data && response.data.code === 200) {
         console.log("✅ Successfully subtracted RT using Legacy API!")
         return {
@@ -480,7 +427,6 @@ class PlayFabService {
           balanceChange: response.data.data.BalanceChange,
         }
       }
-
       throw new Error(`Legacy API returned code: ${response.data?.code || "unknown"}`)
     } catch (error) {
       throw new Error(`Failed to subtract virtual currency (Legacy): ${error.message}`)
@@ -501,15 +447,12 @@ class PlayFabService {
       console.log(`Amount: ${amount} (${amount > 0 ? "ADDITION" : "SUBTRACTION"})`)
       console.log(`User: ${user._id}`)
       console.log(`Payment ID: ${paymentId}`)
-
       // Determine if this is an addition or subtraction
       const isAddition = amount > 0
       const absoluteAmount = Math.abs(amount)
-
       // Try InventoryV2 first (preferred method)
       try {
         console.log(`🎯 Attempting InventoryV2 ${isAddition ? "addition" : "subtraction"} (Production)...`)
-
         let result
         if (isAddition) {
           // Add virtual currency
@@ -526,7 +469,6 @@ class PlayFabService {
             `${paymentData.source || "Deduction"} - ID: ${paymentId}`,
           )
         }
-
         console.log(`✅ InventoryV2 ${isAddition ? "addition" : "subtraction"} successful (Production)`)
         return {
           success: true,
@@ -539,7 +481,6 @@ class PlayFabService {
         }
       } catch (inventoryV2Error) {
         console.log(`❌ InventoryV2 ${isAddition ? "addition" : "subtraction"} failed:`, inventoryV2Error.message)
-
         // Fall back to Legacy API if InventoryV2 fails due to permissions
         if (inventoryV2Error.isPermissionError || inventoryV2Error.code === 1191) {
           console.log("🔄 InventoryV2 permissions not enabled, falling back to Legacy Virtual Currency API...")
@@ -558,7 +499,6 @@ class PlayFabService {
                 `${paymentData.source || "Deduction"} - ID: ${paymentId}`,
               )
             }
-
             console.log(`✅ Legacy API ${isAddition ? "addition" : "subtraction"} successful`)
             return {
               success: true,
@@ -606,6 +546,8 @@ class PlayFabService {
 
   /**
    * Get player inventory (main function - tries InventoryV2 first, falls back to Legacy)
+   * NOTE: This function is likely being called too frequently by an external process,
+   * leading to the high number of GetInventoryItems API calls.
    * @param {Object} user - User object from database
    * @returns {Promise<Object>} Player's inventory data
    */
@@ -647,7 +589,6 @@ class PlayFabService {
       if (!playFabId) {
         throw new Error("No PlayFab ID found")
       }
-
       const response = await axios.post(
         `${this.baseUrl}/Server/GetUserInventory`,
         {
@@ -660,11 +601,9 @@ class PlayFabService {
           },
         },
       )
-
       if (response.data && response.data.code === 200) {
         const virtualCurrency = response.data.data.VirtualCurrency || {}
         const balance = virtualCurrency["RT"] || 0
-
         return {
           success: true,
           virtualCurrencyBalance: balance,
@@ -672,7 +611,6 @@ class PlayFabService {
           method: "legacy_server_api",
         }
       }
-
       throw new Error("Legacy API returned unsuccessful response")
     } catch (error) {
       throw new Error(`Failed to get virtual currency balance: ${error.message}`)
@@ -697,5 +635,4 @@ class PlayFabService {
 
 // Create singleton instance
 const playFabService = new PlayFabService()
-
 module.exports = playFabService

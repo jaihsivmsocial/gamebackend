@@ -57,7 +57,7 @@ const generateRandomQuestion = async () => {
     // let totalTime = 30
 
     const conditions = [
-      " be able to get  5 Kill in 30 sec",
+      "be able to get  5 Kill in 30 sec",
       " be able to get 3 Kill in 35 Sec",
       "be able to get 5 Kill in 40 Sec",
     ];
@@ -102,7 +102,6 @@ async function shouldGenerateQuestions() {
 // Global io instance
 let io;
 
-// IMPORTANT: Move the generateNewQuestion function definition here, before it's used
 // Update the generateNewQuestion function to handle the async generateRandomQuestion
 async function generateNewQuestion(specificStreamId = null) {
   try {
@@ -277,7 +276,7 @@ async function resolveQuestion(questionId) {
 async function checkCameraHolderChanges() {
   try {
     // Fetch the camera holder data from the API
-    const response = await fetch("http://api.5mof.gg/api/players/get");
+    const response = await fetch("http://localhost:5000/api/players/get");
     if (!response.ok) {
       console.error("Failed to fetch camera holder data:", response.status);
       return;
@@ -363,7 +362,7 @@ module.exports = async function setupSocketIO(server) {
   // Create Socket.IO server with Redis adapter for horizontal scaling
   io = new Server(server, {
     cors: {
-      origin: process.env.FRONTEND_URL || "http://api.5mof.gg",
+      origin: process.env.FRONTEND_URL || "http://localhost:5000",
       methods: ["GET", "POST"],
       credentials: true,
     },
@@ -1051,10 +1050,6 @@ module.exports = async function setupSocketIO(server) {
         `Would archive older messages for ${key}, current count: ${count}`
       );
 
-      // In production, you would:
-      // 1. Get the oldest messages
-      // 2. Store them in a database
-      // 3. Remove them from Redis
     }
   }
 
@@ -1248,7 +1243,6 @@ module.exports = async function setupSocketIO(server) {
           totalBetAmount: activeQuestion.totalBetAmount || 0,
           totalPlayers: activeQuestion.totalPlayers || 0,
         });
-
         // Set a timer to resolve this question when it expires
         const now = new Date();
         const timeUntilEnd = activeQuestion.endTime - now;
