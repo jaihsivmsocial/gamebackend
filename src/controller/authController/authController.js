@@ -917,3 +917,287 @@ exports.playFabProxy = async (req, res) => {
     res.status(error.response?.status || 500).json(error.response?.data || { message: "Server error" })
   }
 }
+// Debug version of sendSignupOtp
+exports.sendSignupOtp = async (req, res) => {
+  try {
+    const { email } = req.body
+
+    console.log("=== SENDING SIGNUP OTP ===")
+    console.log("Email requested:", email)
+
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" })
+    }
+
+    const normalizedEmail = email.toLowerCase().trim()
+    console.log("Normalized email:", normalizedEmail)
+
+    // Check if a real user already exists
+    const existingRealUser = await User.findOne({
+      email: normalizedEmail,
+      $or: [{ isTemporary: { $exists: false } }, { isTemporary: false }]
+    })
+
+    if (existingRealUser) {
+      console.log("Real user already exists with this email")
+      return res.status(400).json({ message: "User with this email already exists" })
+    }
+
+    // Generate OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString()
+    console.log("Generated OTP:", otp)
+
+    // Delete existing temp users
+    const deleteResult = await User.deleteMany({
+      email: normalizedEmail,
+      isTemporary: true
+    })
+    console.log("Deleted existing temp users:", deleteResult.deletedCount)
+
+    // Create temp user
+    const tempUser = new User({
+      email: normalizedEmail,
+      isTemporary: true,
+      resetOtp: otp,
+      resetOtpExpires: Date.now() + 15 * 60 * 1000,
+      isOtpVerified: false
+    })
+
+    const savedUser = await tempUser.save()
+    console.log("=== SAVED USER DEBUG ===")
+    console.log("Saved user ID:", savedUser._id)
+    console.log("Saved email:", savedUser.email)
+    console.log("Saved resetOtp:", savedUser.resetOtp)
+    console.log("Saved resetOtpExpires:", savedUser.resetOtpExpires)
+    console.log("Saved isTemporary:", savedUser.isTemporary)
+
+    // Verify the save immediately
+    const verifyRecord = await User.findOne({
+      email: normalizedEmail,
+      isTemporary: true,
+      _id: savedUser._id
+    })
+
+    if (verifyRecord) {
+      console.log("=== VERIFICATION SUCCESS ===")
+      console.log("Found saved record with resetOtp:", verifyRecord.resetOtp)
+      console.log("Expires at:", new Date(verifyRecord.resetOtpExpires))
+      console.log("Current time:", new Date())
+    } else {
+      console.log("=== VERIFICATION FAILED ===")
+      console.log("Could not find the saved record!")
+    }
+
+    // Send email
+    try {
+      await sendOtpEmail(normalizedEmail, otp, 'New User')
+      console.log("OTP email sent successfully")
+    } catch (emailError) {
+      console.error("Failed to send OTP email:", emailError)
+    }
+
+    res.status(200).json({
+      message: "OTP sent to your email for signup verification",
+      testOtp: process.env.NODE_ENV === "development" ? otp : undefined,
+    })
+  } catch (error) {
+    console.error("Signup OTP error:", error)
+    res.status(500).json({ message: "Server error", error: error.message })
+  }
+}
+
+// Debug version of verifySignupOtp
+exports.verifySignupOtp = async (req, res) => {
+  try {
+    const { email, otp, userData } = req.body
+
+    console.log("=== STARTING OTP VERIFICATION ===")
+    console.log("Email for verification:", email)
+    console.log("OTP received:", otp)
+    console.log("OTP type:", typeof otp)
+    console.log("OTP length:", otp ? otp.length : 'undefined')
+
+    if (!email || !otp || !userData) {
+      return res.status(400).json({
+        message: "Email, OTP, and user data are required",
+      })
+    }
+
+    const normalizedEmail = email.toLowerCase().trim()
+    console.log("Normalized email for verification:", normalizedEmail)
+
+    // First, let's see what temp users exist for this email
+    const allTempUsers = await User.find({
+      email: normalizedEmail,
+      isTemporary: true
+    }).select('resetOtp resetOtpExpires isTemporary email')
+
+    console.log("=== ALL TEMP USERS FOR EMAIL ===")
+    console.log("Found", allTempUsers.length, "temp users")
+    allTempUsers.forEach((user, index) => {
+      console.log(`User ${index + 1}:`)
+      console.log("  - ID:", user._id)
+      console.log("  - Email:", user.email)
+      console.log("  - resetOtp:", user.resetOtp)
+      console.log("  - resetOtp type:", typeof user.resetOtp)
+      console.log("  - resetOtpExpires:", user.resetOtpExpires)
+      console.log("  - isTemporary:", user.isTemporary)
+      console.log("  - Expired?", user.resetOtpExpires < Date.now())
+      console.log("  - OTP Match?", user.resetOtp === otp)
+    })
+
+    // Now try to find the exact match
+    const tempUser = await User.findOne({
+      email: normalizedEmail,
+      isTemporary: true,
+      resetOtp: otp,
+      resetOtpExpires: { $gt: Date.now() }
+    })
+
+    if (!tempUser) {
+      console.log("=== NO MATCH FOUND ===")
+      
+      // Try without expiration check
+      const tempUserNoExpiry = await User.findOne({
+        email: normalizedEmail,
+        isTemporary: true,
+        resetOtp: otp
+      })
+
+      if (tempUserNoExpiry) {
+        console.log("Found user with matching OTP but expired:")
+        console.log("Expires:", tempUserNoExpiry.resetOtpExpires)
+        console.log("Current:", Date.now())
+        return res.status(400).json({ 
+          message: "OTP has expired. Please request a new verification code." 
+        })
+      } else {
+        console.log("No user found with matching OTP at all")
+        return res.status(400).json({ 
+          message: "Invalid verification code. Please check and try again." 
+        })
+      }
+    }
+
+    console.log("=== FOUND MATCHING USER ===")
+    console.log("User ID:", tempUser._id)
+    console.log("User resetOtp:", tempUser.resetOtp)
+    console.log("Provided OTP:", otp)
+    console.log("Match confirmed:", tempUser.resetOtp === otp)
+
+    // Continue with user registration...
+    const { username, password } = userData
+    if (!username || !password) {
+      return res.status(400).json({ message: "Username and password are required" })
+    }
+
+    const standardizedUsername = username.toLowerCase()
+
+    // Check for existing users
+    const existingRealUser = await User.findOne({
+      $or: [
+        { email: normalizedEmail, isTemporary: { $ne: true } },
+        { username: standardizedUsername, isTemporary: { $ne: true } }
+      ],
+    })
+    
+    if (existingRealUser) {
+      await User.deleteOne({ _id: tempUser._id })
+      if (existingRealUser.email === normalizedEmail) {
+        return res.status(400).json({ message: "Email already registered" })
+      } else {
+        return res.status(400).json({ message: "Username already taken" })
+      }
+    }
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10)
+    const hashedPassword = await bcrypt.hash(password, salt)
+
+    // Register with PlayFab
+    let playfabResponse
+    try {
+      playfabResponse = await playfabRequest("/Client/RegisterPlayFabUser", {
+        TitleId: PLAYFAB_TITLE_ID,
+        Username: standardizedUsername,
+        DisplayName: standardizedUsername,
+        Email: normalizedEmail,
+        Password: password,
+        RequireBothUsernameAndEmail: true,
+      })
+    } catch (playfabError) {
+      console.error("PlayFab registration error:", playfabError)
+      await User.deleteOne({ _id: tempUser._id })
+      return res.status(400).json({
+        message: "Registration failed",
+        error: playfabError.response?.data?.errorMessage || "PlayFab registration error",
+      })
+    }
+
+    // Extract PlayFab data
+    const entityId = playfabResponse.data.EntityToken?.Entity?.Id
+    const entityToken = playfabResponse.data.EntityToken?.EntityToken
+    const entityTokenExpiration = playfabResponse.data.EntityToken?.TokenExpiration
+
+    // Convert temp user to real user
+    tempUser.username = standardizedUsername
+    tempUser.password = hashedPassword
+    tempUser.DisplayName = standardizedUsername
+    tempUser.playfabId = playfabResponse.data.PlayFabId
+    tempUser.playfabEntityId = entityId
+    tempUser.playfabEntityToken = entityToken
+    tempUser.playfabEntityTokenExpiration = entityTokenExpiration ? new Date(entityTokenExpiration) : null
+    tempUser.playfabSessionTicket = playfabResponse.data.SessionTicket
+    tempUser.playfabLastLogin = new Date()
+    tempUser.walletBalance = 10
+    tempUser.isTemporary = false
+    tempUser.isOtpVerified = true
+    tempUser.resetOtp = undefined
+    tempUser.resetOtpExpires = undefined
+
+    await tempUser.save()
+
+    // Sync wallet balance
+    if (tempUser.walletBalance > 0) {
+      try {
+        await updatePlayFabInventory(
+          tempUser,
+          tempUser.walletBalance,
+          `initial_registration_${tempUser._id}_${Date.now()}`,
+          "initial_wallet_sync",
+        )
+      } catch (syncError) {
+        console.error("Wallet sync error:", syncError)
+      }
+    }
+
+    // Generate JWT
+    const token = jwt.sign(
+      { id: tempUser._id, username: tempUser.username }, 
+      process.env.JWT_SECRET, 
+      { expiresIn: "7d" }
+    )
+
+    return res.status(201).json({
+      code: playfabResponse.code,
+      status: playfabResponse.status,
+      data: playfabResponse.data,
+      message: "Email verified and user registered successfully",
+      token,
+      user: {
+        id: tempUser._id,
+        username: tempUser.username,
+        DisplayName: standardizedUsername,
+        email: tempUser.email,
+        profilePicture: tempUser.profilePicture,
+        playfabId: tempUser.playfabId,
+        playfabEntityId: tempUser.playfabEntityId,
+        walletBalance: tempUser.walletBalance,
+      },
+    })
+
+  } catch (error) {
+    console.error("Signup OTP verification error:", error)
+    res.status(500).json({ message: "Server error", error: error.message })
+  }
+}
