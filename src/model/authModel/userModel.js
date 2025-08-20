@@ -35,9 +35,9 @@ const UserSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-   DisplayName:{
-    type:String,
-   },
+    DisplayName: {
+      type: String,
+    },
     otp: {
       type: String,
       required: false,
@@ -51,10 +51,22 @@ const UserSchema = new mongoose.Schema(
       unique: true,
       sparse: true,
     },
+    // FIXED: Removed duplicate playfabId
     playfabId: {
       type: String,
-      sparse: true,
+      sparse: true, // Allow null values but ensure uniqueness when present
     },
+    playfabEntityId: {
+      type: String,
+      sparse: true, // This is the Entity ID required for InventoryV2
+    },
+    playfabEntityToken: {
+      type: String, // Store the actual EntityToken
+    },
+    playfabEntityTokenExpiration: {
+      type: Date, // When the EntityToken expires
+    },
+    // FIXED: Removed duplicate playfabSessionTicket
     playfabSessionTicket: {
       type: String,
       sparse: true,
@@ -75,26 +87,6 @@ const UserSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-     playfabId: {
-      type: String,
-      sparse: true, // Allow null values but ensure uniqueness when present
-    },
-    playfabEntityId: {
-      type: String,
-      sparse: true, // This is the Entity ID required for InventoryV2
-    },
-    playfabEntityToken: {
-      type: String, // Store the actual EntityToken
-    },
-    playfabEntityTokenExpiration: {
-      type: Date, // When the EntityToken expires
-    },
-    playfabSessionTicket: {
-      type: String,
-    },
-    playfabLastLogin: {
-      type: Date,
-    },
     biggestWin: {
       type: Number,
       default: 0,
@@ -103,16 +95,56 @@ const UserSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
-    // Add these fields for password reset
+    isTemporary: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    // Password reset fields
     resetPasswordToken: String,
     resetPasswordExpires: Date,
-    isOtpVerified: Boolean,
-
-    // Keep these if you're using them elsewhere
+    
+    // OTP verification fields
+    isOtpVerified: {
+      type: Boolean,
+      default: false,
+    },
+    
+    // Signup/General OTP fields
     resetOtp: String,
     resetOtpExpires: Date,
   },
   { timestamps: true }
+);
+
+// FIXED: Updated TTL index to handle both password reset and signup OTP expiration
+UserSchema.index(
+  {
+    isTemporary: 1,
+    resetPasswordExpires: 1,
+  },
+  {
+    expireAfterSeconds: 3600, // Delete temp records after 1 hour
+    partialFilterExpression: {
+      isTemporary: true,
+      resetPasswordExpires: { $exists: true }
+    }
+  }
+);
+
+// Additional TTL index for signup OTP expiration
+UserSchema.index(
+  {
+    isTemporary: 1,
+    resetOtpExpires: 1,
+  },
+  {
+    expireAfterSeconds: 3600, // Delete temp records after 1 hour
+    partialFilterExpression: {
+      isTemporary: true,
+      resetOtpExpires: { $exists: true }
+    }
+  }
 );
 
 module.exports = mongoose.model("User", UserSchema);
